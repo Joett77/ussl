@@ -1,0 +1,17 @@
+[package]
+name = "ussl-cli"
+description = "USSL CLI client - connect and interact with USSL servers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ussl"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true, features = ["full"] }
+clap = { version = "4.4", features = ["derive"] }
+rustyline = "13.0"
+colored = "2.1"
+anyhow.workspace = true

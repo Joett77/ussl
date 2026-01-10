@@ -1,0 +1,30 @@
+[package]
+name = "usld"
+description = "USSL Daemon - Universal State Synchronization Layer server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "usld"
+path = "src/main.rs"
+
+[dependencies]
+ussl-core.workspace = true
+ussl-protocol.workspace = true
+ussl-storage.workspace = true
+ussl-transport.workspace = true
+
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+# CLI
+clap = { version = "4.4", features = ["derive", "env"] }
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.10"

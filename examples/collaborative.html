@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USSL Collaborative Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        body {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .card h2 {
+            margin-top: 0;
+            color: #444;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        textarea {
+            height: 150px;
+            resize: vertical;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .counter {
+            font-size: 48px;
+            font-weight: bold;
+            text-align: center;
+            color: #333;
+        }
+        .presence {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .presence-item {
+            padding: 5px 10px;
+            background: #e9ecef;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        .log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .log-entry {
+            margin: 2px 0;
+        }
+        .log-entry.send {
+            color: #4ec9b0;
+        }
+        .log-entry.recv {
+            color: #ce9178;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔄 USSL Collaborative Demo</h1>
+
+    <div id="status" class="status disconnected">
+        Disconnected - Start usld server first
+    </div>
+
+    <div class="card">
+        <h2>📝 Shared Document</h2>
+        <p>Edit this text - changes sync in real-time:</p>
+        <textarea id="editor" placeholder="Start typing..."></textarea>
+    </div>
+
+    <div class="card">
+        <h2>🔢 Shared Counter</h2>
+        <div class="counter" id="counter">0</div>
+        <div style="text-align: center; margin-top: 10px;">
+            <button onclick="incrementCounter(-1)">- Decrease</button>
+            <button onclick="incrementCounter(1)">+ Increase</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>👥 Presence</h2>
+        <div>
+            <input type="text" id="username" placeholder="Your name" style="margin-bottom: 10px;">
+        </div>
+        <div class="presence" id="presence">
+            <!-- Presence items will appear here -->
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📋 Protocol Log</h2>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        // Simple USSL client for demo
+        class USSLClient {
+            constructor(url) {
+                this.url = url;
+                this.ws = null;
+                this.callbacks = new Map();
+                this.subscriptions = new Map();
+                this.pending = [];
+            }
+
+            async connect() {
+                return new Promise((resolve, reject) => {
+                    this.ws = new WebSocket(this.url);
+
+                    this.ws.onopen = () => {
+                        log('Connected to USSL', 'recv');
+                        updateStatus(true);
+                        resolve();
+                    };
+
+                    this.ws.onclose = () => {
+                        log('Disconnected', 'recv');
+                        updateStatus(false);
+                    };
+
+                    this.ws.onerror = (e) => {
+                        log('Error: ' + e.message, 'recv');
+                        reject(e);
+                    };
+
+                    this.ws.onmessage = (e) => {
+                        this.handleMessage(e.data);
+                    };
+                });
+            }
+
+            handleMessage(data) {
+                log(data.trim(), 'recv');
+
+                // Handle delta updates
+                if (data.startsWith('#')) {
+                    const match = data.match(/^#(\d+)\s+/);
+                    if (match) {
+                        // Trigger refresh for subscriptions
+                        for (const [id, cb] of this.subscriptions) {
+                            this.get(id).then(cb);
+                        }
+                    }
+                    return;
+                }
+
+                const pending = this.pending.shift();
+                if (pending) {
+                    pending.resolve(data);
+                }
+            }
+
+            async send(cmd) {
+                log(cmd, 'send');
+                return new Promise((resolve) => {
+                    this.pending.push({ resolve });
+                    this.ws.send(cmd + '\r\n');
+                });
+            }
+
+            async get(id, path) {
+                const cmd = path ? `GET ${id} PATH ${path}` : `GET ${id}`;
+                const resp = await this.send(cmd);
+                return this.parseValue(resp);
+            }
+
+            async set(id, path, value) {
+                const jsonValue = JSON.stringify(value);
+                await this.send(`SET ${id} ${path} ${jsonValue}`);
+            }
+
+            async inc(id, path, delta = 1) {
+                const resp = await this.send(`INC ${id} ${path} ${delta}`);
+                const match = resp.match(/^:(-?\d+)/);
+                return match ? parseInt(match[1]) : 0;
+            }
+
+            async subscribe(id, callback) {
+                this.subscriptions.set(id, callback);
+                await this.send(`SUB ${id}`);
+                const value = await this.get(id);
+                callback(value);
+            }
+
+            async presence(id, data) {
+                if (data) {
+                    await this.send(`PRESENCE ${id} DATA ${JSON.stringify(data)}`);
+                } else {
+                    return this.send(`PRESENCE ${id}`);
+                }
+            }
+
+            parseValue(resp) {
+                if (resp === '$-1\r\n' || resp === '$-1') return null;
+
+                // Try to extract JSON from bulk string
+                const match = resp.match(/^\$\d+\r?\n?(.*)/s);
+                if (match) {
+                    try {
+                        return JSON.parse(match[1]);
+                    } catch {
+                        return match[1];
+                    }
+                }
+
+                try {
+                    return JSON.parse(resp);
+                } catch {
+                    return resp;
+                }
+            }
+        }
+
+        // Logging
+        function log(message, type = '') {
+            const logEl = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + type;
+            entry.textContent = (type === 'send' ? '→ ' : '← ') + message;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const el = document.getElementById('status');
+            el.className = 'status ' + (connected ? 'connected' : 'disconnected');
+            el.textContent = connected ? 'Connected to USSL' : 'Disconnected';
+        }
+
+        // Main
+        let client;
+        const DOC_ID = 'demo:shared';
+        const COUNTER_ID = 'demo:counter';
+
+        async function init() {
+            client = new USSLClient('ws://localhost:6381');
+
+            try {
+                await client.connect();
+
+                // Subscribe to shared document
+                await client.subscribe(DOC_ID, (value) => {
+                    const editor = document.getElementById('editor');
+                    if (document.activeElement !== editor) {
+                        editor.value = value?.content || '';
+                    }
+                });
+
+                // Subscribe to counter
+                await client.subscribe(COUNTER_ID, (value) => {
+                    document.getElementById('counter').textContent = value?.count || 0;
+                });
+
+                // Setup editor
+                const editor = document.getElementById('editor');
+                let debounce;
+                editor.addEventListener('input', () => {
+                    clearTimeout(debounce);
+                    debounce = setTimeout(() => {
+                        client.set(DOC_ID, 'content', editor.value);
+                    }, 100);
+                });
+
+                // Setup username/presence
+                const username = document.getElementById('username');
+                username.addEventListener('change', () => {
+                    if (username.value) {
+                        client.presence(DOC_ID, { name: username.value });
+                    }
+                });
+
+            } catch (e) {
+                log('Failed to connect: ' + e.message, 'recv');
+            }
+        }
+
+        async function incrementCounter(delta) {
+            if (client) {
+                const newValue = await client.inc(COUNTER_ID, 'count', delta);
+                document.getElementById('counter').textContent = newValue;
+            }
+        }
+
+        // Start
+        init();
+    </script>
+</body>
+</html>

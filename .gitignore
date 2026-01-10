@@ -1,0 +1,43 @@
+# Rust
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js (SDKs)
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python (SDKs)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Testing
+coverage/
+.coverage
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local

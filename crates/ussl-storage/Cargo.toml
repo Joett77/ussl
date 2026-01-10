@@ -1,0 +1,29 @@
+[package]
+name = "ussl-storage"
+description = "Storage backends for USSL (memory, SQLite, PostgreSQL)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["memory"]
+memory = []
+sqlite = ["dep:rusqlite"]
+postgres = ["dep:sqlx"]
+
+[dependencies]
+ussl-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+async-trait = "0.1"
+dashmap.workspace = true
+
+# Optional backends
+rusqlite = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

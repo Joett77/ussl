@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  ussl:
+    build: .
+    ports:
+      - "6380:6380"  # TCP
+      - "6381:6381"  # WebSocket
+    environment:
+      - USSL_LOG_LEVEL=info
+      - RUST_BACKTRACE=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo PING | nc -w 1 localhost 6380 | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Development environment with hot reload
+  ussl-dev:
+    image: rust:1.75-slim-bookworm
+    working_dir: /app
+    volumes:
+      - .:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    ports:
+      - "6380:6380"
+      - "6381:6381"
+    command: >
+      bash -c "
+        apt-get update && apt-get install -y pkg-config libssl-dev netcat-openbsd &&
+        cargo run --bin usld -- --bind 0.0.0.0
+      "
+    profiles:
+      - dev
+
+  # PostgreSQL for persistent storage (future)
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ussl
+      POSTGRES_PASSWORD: ussl
+      POSTGRES_DB: ussl
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    profiles:
+      - full
+
+volumes:
+  cargo-cache:
+  target-cache:
+  postgres-data:
