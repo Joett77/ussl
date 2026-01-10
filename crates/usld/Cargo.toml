@@ -28,3 +28,21 @@ toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3.10"
+
+[package.metadata.deb]
+maintainer = "USSL Contributors <ussl@users.noreply.github.com>"
+copyright = "2024, USSL Contributors"
+license-file = ["../../LICENSE-MIT", "0"]
+extended-description = """\
+USSL (Universal State Synchronization Layer) is an open-source \
+infrastructure primitive for state synchronization across distributed systems. \
+Features CRDT-based conflict resolution, real-time updates, and offline support."""
+depends = "$auto"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/usld", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/usld/README", "644"],
+]
+conf-files = ["/etc/ussl/ussl.toml"]
+systemd-units = { enable = false }
