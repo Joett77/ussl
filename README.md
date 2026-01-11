@@ -606,6 +606,183 @@ USSL uniquely combines:
 - **Offline-first of CouchDB** - Without the complexity
 - **Open source** - No vendor lock-in, self-hosted
 
+## Integration Guide
+
+USSL is a database service - your applications connect to it explicitly, just like Redis, PostgreSQL, or MongoDB.
+
+### How It Works
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Your App      │     │   USSL Server   │     │   Other Apps    │
+│   (Frontend)    │────▶│   (usld)        │◀────│   (Backend)     │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+        │                       │                       │
+        │    WebSocket/TCP      │                       │
+        └───────────────────────┴───────────────────────┘
+                        All apps share state
+```
+
+1. **Install USSL server** on your infrastructure
+2. **Connect from your code** using SDK or TCP protocol
+3. **Read/write documents** - changes sync automatically to all connected clients
+
+### React/Next.js Integration
+
+```typescript
+// lib/ussl.ts
+import { USSL } from '@ussl/client';
+
+let client: USSL | null = null;
+
+export async function getUSSL() {
+  if (!client) {
+    client = await USSL.connect(process.env.NEXT_PUBLIC_USSL_URL!);
+    if (process.env.NEXT_PUBLIC_USSL_PASSWORD) {
+      await client.auth(process.env.NEXT_PUBLIC_USSL_PASSWORD);
+    }
+  }
+  return client;
+}
+
+// components/UserProfile.tsx
+import { useEffect, useState } from 'react';
+import { getUSSL } from '@/lib/ussl';
+
+export function UserProfile({ userId }: { userId: string }) {
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    let doc: any;
+
+    async function setup() {
+      const client = await getUSSL();
+      doc = client.doc(`user:${userId}`);
+
+      // Subscribe to real-time updates
+      doc.subscribe((value) => setUser(value));
+    }
+
+    setup();
+    return () => doc?.unsubscribe();
+  }, [userId]);
+
+  const updateName = async (name: string) => {
+    const client = await getUSSL();
+    await client.doc(`user:${userId}`).set('name', name);
+    // All connected clients see the change instantly
+  };
+
+  return (
+    <div>
+      <h1>{user?.name}</h1>
+      <button onClick={() => updateName('New Name')}>Change Name</button>
+    </div>
+  );
+}
+```
+
+### Node.js Backend Integration
+
+```typescript
+// services/ussl.ts
+import { USSL } from '@ussl/client';
+
+const client = await USSL.connect('tcp://localhost:6380');
+await client.auth(process.env.USSL_PASSWORD!);
+
+// Save user session
+export async function saveSession(sessionId: string, data: any) {
+  await client.doc(`session:${sessionId}`).set('data', data);
+}
+
+// Get user session
+export async function getSession(sessionId: string) {
+  return await client.doc(`session:${sessionId}`).get();
+}
+
+// Real-time notifications
+export async function subscribeToUser(userId: string, callback: (data: any) => void) {
+  const doc = client.doc(`user:${userId}`);
+  doc.subscribe(callback);
+  return () => doc.unsubscribe();
+}
+```
+
+### Raw TCP Integration (Any Language)
+
+USSL uses a simple text protocol. You can connect from any language:
+
+```python
+# Python example (without SDK)
+import socket
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(('localhost', 6380))
+
+# Authenticate
+sock.send(b'AUTH mypassword\r\n')
+print(sock.recv(1024))  # +OK
+
+# Set value
+sock.send(b'SET user:123 name "Alice"\r\n')
+print(sock.recv(1024))  # +OK
+
+# Get value
+sock.send(b'GET user:123\r\n')
+print(sock.recv(1024))  # {"name": "Alice"}
+
+sock.close()
+```
+
+```go
+// Go example
+package main
+
+import (
+    "bufio"
+    "fmt"
+    "net"
+)
+
+func main() {
+    conn, _ := net.Dial("tcp", "localhost:6380")
+    defer conn.Close()
+
+    reader := bufio.NewReader(conn)
+
+    // Authenticate
+    fmt.Fprintf(conn, "AUTH mypassword\r\n")
+    response, _ := reader.ReadString('\n')
+    fmt.Println(response) // +OK
+
+    // Set value
+    fmt.Fprintf(conn, "SET user:123 name \"Alice\"\r\n")
+    response, _ = reader.ReadString('\n')
+    fmt.Println(response) // +OK
+}
+```
+
+### Environment Configuration
+
+```bash
+# .env (development)
+USSL_URL=ws://localhost:6381
+USSL_PASSWORD=
+
+# .env.production
+USSL_URL=wss://ussl.yourserver.com:6381
+USSL_PASSWORD=your-secure-password
+```
+
+### Best Practices
+
+1. **Connection pooling**: Reuse USSL client connections, don't create new ones per request
+2. **Document IDs**: Use namespaced IDs like `user:123`, `game:456`, `session:abc`
+3. **Subscriptions**: Unsubscribe when components unmount to avoid memory leaks
+4. **Error handling**: Wrap USSL calls in try/catch, handle reconnection
+5. **Authentication**: Always use `--password` in production
+
 ## Roadmap
 
 - [x] v0.1 - Core engine, LWW strategy, memory storage, TCP, WebSocket
