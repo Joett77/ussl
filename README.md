@@ -511,6 +511,28 @@ Both edit same spot   -->  USSL  -->  Conflict resolved automatically
 
 **Benefits:** No custom sync code, offline play works, automatic conflict resolution.
 
+```typescript
+// Game client - TypeScript
+const client = await USSL.connect('ws://game-server:6381');
+const gameState = client.doc('game:room-123', { strategy: 'crdt-map' });
+
+// Player places a building
+await gameState.set('buildings.tower1', {
+  x: 100, y: 200,
+  type: 'tower',
+  owner: 'player-a'
+});
+
+// Listen for other players' changes
+gameState.subscribe((state) => {
+  renderBuildings(state.buildings);
+  renderUnits(state.units);
+});
+
+// Move units - all players see it instantly
+await gameState.set('units.soldier1.position', { x: 150, y: 180 });
+```
+
 ### 2. Collaborative Documents
 
 Multiple users editing the same document simultaneously:
@@ -523,6 +545,27 @@ Carol types on phone   --/
 
 **Benefits:** Real-time collaboration, works offline (syncs when back online).
 
+```typescript
+// Collaborative editor - TypeScript
+const client = await USSL.connect('ws://docs-server:6381');
+const doc = client.doc('doc:meeting-notes', { strategy: 'crdt-text' });
+
+// User types text
+await doc.set('content', 'Meeting agenda:\n1. Review Q4 results');
+
+// Show who's editing (presence)
+client.presence.set('doc:meeting-notes', {
+  user: 'Alice',
+  cursor: { line: 1, col: 15 }
+});
+
+// Real-time sync
+doc.subscribe((value) => {
+  editor.setValue(value.content);
+  showCursors(value.presence);
+});
+```
+
 ### 3. Shared Shopping Lists
 
 Family members can add items from different devices:
@@ -534,6 +577,221 @@ Kid adds: eggs     --/
 ```
 
 **Benefits:** No lost items, works without internet, syncs automatically.
+
+```typescript
+// Shopping list app - TypeScript
+const client = await USSL.connect('ws://home-server:6381');
+const list = client.doc('list:groceries', { strategy: 'crdt-set' });
+
+// Add items (from any device)
+await list.push('items', { name: 'Milk', qty: 2 });
+await list.push('items', { name: 'Bread', qty: 1 });
+
+// Mark item as bought
+await list.set('items.0.bought', true);
+
+// Sync across all family devices
+list.subscribe((value) => {
+  renderShoppingList(value.items);
+});
+```
+
+### 4. Real-time Dashboards
+
+Live metrics from multiple data sources:
+
+```
+Sensor A: temp=22°C  --\
+Sensor B: temp=24°C  ---+--> USSL --> Dashboard shows all readings
+Server C: cpu=45%    --/
+```
+
+**Benefits:** Instant updates, multiple data sources, no polling needed.
+
+```python
+# Sensor sending data - Python
+import socket
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(('dashboard-server', 6380))
+sock.send(b'AUTH sensor-secret\r\n')
+
+# Send temperature reading every second
+while True:
+    temp = read_temperature_sensor()
+    sock.send(f'SET sensor:temp-01 value {temp}\r\n'.encode())
+    sock.send(f'SET sensor:temp-01 timestamp {time.time()}\r\n'.encode())
+    time.sleep(1)
+```
+
+```typescript
+// Dashboard frontend - TypeScript
+const client = await USSL.connect('ws://dashboard-server:6381');
+
+// Subscribe to all sensors
+client.subscribe('sensor:*', (sensorId, value) => {
+  updateChart(sensorId, value);
+});
+```
+
+### 5. IoT Device State
+
+Smart home devices staying in sync:
+
+```
+Phone: lights=ON     --\
+Alexa: lights=OFF    ---+--> USSL --> All devices agree: lights=OFF (last wins)
+Switch: lights=ON    --/
+```
+
+**Benefits:** Device-agnostic, works on any protocol, conflict resolution built-in.
+
+```python
+# Smart switch - Python (embedded)
+import socket
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(('home-hub', 6380))
+sock.send(b'AUTH device-key\r\n')
+
+# Report switch state
+sock.send(b'SET device:switch-living-room state "ON"\r\n')
+
+# Subscribe to commands from app
+sock.send(b'SUB device:switch-living-room\r\n')
+while True:
+    data = sock.recv(1024)
+    if b'"OFF"' in data:
+        turn_off_relay()
+    elif b'"ON"' in data:
+        turn_on_relay()
+```
+
+```typescript
+// Phone app - TypeScript
+const client = await USSL.connect('ws://home-hub:6381');
+const light = client.doc('device:switch-living-room');
+
+// Toggle light from app
+await light.set('state', 'OFF');
+
+// See state changes from physical switch
+light.subscribe((value) => {
+  updateLightIcon(value.state);
+});
+```
+
+### 6. Fleet Management / Geolocation
+
+Track vehicles or assets in real-time:
+
+```
+Car 1: pos={45.1, 9.2}, speed=80  --\
+Car 2: pos={45.3, 9.1}, speed=60  ---+--> USSL --> Fleet dashboard sees all
+Car 3: pos={45.0, 9.4}, speed=0   --/
+```
+
+**Benefits:** Offline-first (syncs after tunnels), delta updates only, low bandwidth.
+
+```python
+# Vehicle tracker - Python (on-board device)
+import socket
+import json
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.connect(('fleet-server', 6380))
+sock.send(b'AUTH vehicle-token\r\n')
+
+vehicle_id = 'vehicle:truck-42'
+
+while True:
+    gps = read_gps()
+    obd = read_obd_diagnostics()
+
+    # Send position and diagnostics
+    data = json.dumps({
+        'lat': gps.lat,
+        'lon': gps.lon,
+        'speed': gps.speed,
+        'fuel': obd.fuel_level,
+        'engine_temp': obd.engine_temp
+    })
+    sock.send(f'SET {vehicle_id} data {data}\r\n'.encode())
+    time.sleep(5)
+```
+
+```typescript
+// Fleet dashboard - TypeScript
+const client = await USSL.connect('ws://fleet-server:6381');
+
+// Track all vehicles on map
+client.subscribe('vehicle:*', (vehicleId, data) => {
+  updateMapMarker(vehicleId, data.lat, data.lon);
+  updateVehicleInfo(vehicleId, {
+    speed: data.speed,
+    fuel: data.fuel
+  });
+});
+
+// Get all current positions
+const vehicles = await client.keys('vehicle:*');
+for (const id of vehicles) {
+  const data = await client.doc(id).get();
+  addMapMarker(id, data);
+}
+```
+
+### 7. Delivery Tracking
+
+Couriers and customers see the same live position:
+
+```
+Courier GPS: pos=Milano  --\
+                          ---+--> USSL --> Customer app shows live location
+Backend: status=delivering--/
+```
+
+**Benefits:** Real-time updates, works on spotty mobile networks, no polling.
+
+```typescript
+// Courier app - TypeScript (React Native)
+const client = await USSL.connect('wss://delivery-api.example.com:6381');
+await client.auth(courierToken);
+
+const delivery = client.doc(`delivery:${orderId}`);
+
+// Update position as courier moves
+navigator.geolocation.watchPosition((pos) => {
+  delivery.set('courier_position', {
+    lat: pos.coords.latitude,
+    lon: pos.coords.longitude,
+    accuracy: pos.coords.accuracy,
+    timestamp: Date.now()
+  });
+});
+
+// Update delivery status
+await delivery.set('status', 'picked_up');
+await delivery.set('status', 'on_the_way');
+await delivery.set('status', 'arrived');
+```
+
+```typescript
+// Customer app - TypeScript (React)
+const client = await USSL.connect('wss://delivery-api.example.com:6381');
+const delivery = client.doc(`delivery:${myOrderId}`);
+
+delivery.subscribe((value) => {
+  // Show courier on map
+  if (value.courier_position) {
+    updateCourierMarker(value.courier_position);
+    showETA(calculateETA(value.courier_position, myAddress));
+  }
+
+  // Show status updates
+  showStatus(value.status); // "picked_up", "on_the_way", "arrived"
+});
+```
 
 ## Architecture
 
