@@ -30,12 +30,16 @@ use rustyline::DefaultEditor;
 #[command(author, version, about = "USSL CLI - Universal State Sync Layer client")]
 struct Args {
     /// Server hostname
-    #[arg(short = 'H', long, default_value = "127.0.0.1")]
+    #[arg(short = 'H', long, default_value = "127.0.0.1", env = "USSL_HOST")]
     host: String,
 
     /// Server port
-    #[arg(short, long, default_value = "6380")]
+    #[arg(short, long, default_value = "6380", env = "USSL_PORT")]
     port: u16,
+
+    /// Password for authentication
+    #[arg(short = 'a', long, env = "USSL_PASSWORD")]
+    password: Option<String>,
 
     /// Execute command and exit
     #[arg(short, long)]
@@ -57,16 +61,26 @@ fn main() -> Result<()> {
 
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
 
+    // Authenticate if password provided
+    if let Some(ref password) = args.password {
+        execute_command(&mut stream, &format!("AUTH {}", password))
+            .with_context(|| "Authentication failed")?;
+        if !args.quiet {
+            println!("{}", "Authenticated.".green());
+        }
+    }
+
     if !args.quiet {
+        let auth_status = if args.password.is_some() { " (authenticated)" } else { "" };
         println!(
             "{}",
             format!(
                 r#"
   ╦ ╦╔═╗╔═╗╦    CLI
-  ║ ║╚═╗╚═╗║    Connected to {}
+  ║ ║╚═╗╚═╗║    Connected to {}{}
   ╚═╝╚═╝╚═╝╩═╝  Type 'help' for commands, 'quit' to exit
 "#,
-                addr
+                addr, auth_status
             )
             .cyan()
         );
@@ -203,6 +217,9 @@ fn print_help() {
 {}
 
 {}
+  AUTH <password>                        Authenticate with server
+
+{}
   CREATE <id> [STRATEGY <s>] [TTL <ms>]  Create a new document
   GET <id> [PATH <path>]                 Get document or path value
   SET <id> <path> <value>                Set value at path
@@ -238,6 +255,7 @@ fn print_help() {
   crdt-text    Collaborative text editing
 "#,
         "USSL Commands".cyan().bold(),
+        "Authentication".yellow().bold(),
         "Documents".yellow().bold(),
         "Subscriptions".yellow().bold(),
         "Operations".yellow().bold(),

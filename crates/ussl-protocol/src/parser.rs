@@ -69,6 +69,7 @@ impl Parser {
             .to_uppercase();
 
         match cmd.as_str() {
+            "AUTH" => Self::parse_auth(&mut tokens),
             "CREATE" => Self::parse_create(&mut tokens),
             "GET" => Self::parse_get(&mut tokens),
             "SET" => Self::parse_set(&mut tokens),
@@ -84,6 +85,13 @@ impl Parser {
             "KEYS" => Self::parse_keys(&mut tokens),
             _ => Err(ProtocolError::InvalidCommand(format!("Unknown command: {}", cmd))),
         }
+    }
+
+    fn parse_auth(tokens: &mut Tokenizer) -> ProtocolResult<Command> {
+        let password = tokens.next()
+            .ok_or_else(|| ProtocolError::MissingArgument("password".into()))?;
+
+        Ok(Command::auth(password.to_string()))
     }
 
     fn parse_create(tokens: &mut Tokenizer) -> ProtocolResult<Command> {

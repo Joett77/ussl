@@ -9,6 +9,26 @@ members = [
     "crates/ussl-cli",
 ]
 
+[package]
+name = "ussl-workspace"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+tokio = { workspace = true }
+ussl-core = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[[example]]
+name = "benchmark"
+path = "examples/benchmark.rs"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2021"

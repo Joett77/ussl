@@ -13,6 +13,7 @@ websocket = ["dep:tokio-tungstenite"]
 [dependencies]
 ussl-core.workspace = true
 ussl-protocol.workspace = true
+ussl-storage.workspace = true
 tokio = { workspace = true, features = ["net", "io-util", "sync", "rt"] }
 tokio-tungstenite = { workspace = true, optional = true }
 futures-util.workspace = true

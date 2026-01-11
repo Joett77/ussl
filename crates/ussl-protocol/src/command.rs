@@ -13,6 +13,11 @@ pub struct Command {
 /// All supported USSP commands
 #[derive(Debug, Clone)]
 pub enum CommandKind {
+    /// AUTH <password>
+    Auth {
+        password: String,
+    },
+
     /// CREATE <id> [STRATEGY <s>] [TTL <ms>]
     Create {
         strategy: Strategy,
@@ -166,6 +171,13 @@ impl Command {
     pub fn keys(pattern: Option<String>) -> Self {
         Command {
             kind: CommandKind::Keys { pattern },
+            document_id: None,
+        }
+    }
+
+    pub fn auth(password: String) -> Self {
+        Command {
+            kind: CommandKind::Auth { password },
             document_id: None,
         }
     }

@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 ussl-core.workspace = true
 ussl-protocol.workspace = true
-ussl-storage.workspace = true
+ussl-storage = { workspace = true, features = ["sqlite"] }
 ussl-transport.workspace = true
 
 tokio = { workspace = true, features = ["full"] }
@@ -43,6 +43,15 @@ priority = "optional"
 assets = [
     ["target/release/usld", "usr/bin/", "755"],
     ["../../README.md", "usr/share/doc/usld/README", "644"],
+    ["config/ussl.toml", "etc/ussl/ussl.toml", "644"],
 ]
 conf-files = ["/etc/ussl/ussl.toml"]
-systemd-units = { enable = false }
+systemd-units = { unit-name = "usld", enable = false }
+
+[package.metadata.deb.variants.default]
+assets = [
+    ["target/release/usld", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/usld/README", "644"],
+    ["config/ussl.toml", "etc/ussl/ussl.toml", "644"],
+    ["systemd/usld.service", "lib/systemd/system/usld.service", "644"],
+]

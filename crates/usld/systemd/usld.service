@@ -1,0 +1,27 @@
+[Unit]
+Description=USSL Daemon - Universal State Synchronization Layer
+Documentation=https://github.com/Joett77/ussl
+After=network.target
+
+[Service]
+Type=simple
+User=ussl
+Group=ussl
+ExecStart=/usr/bin/usld --config /etc/ussl/ussl.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/ussl
+
+# Environment
+Environment=USSL_LOG_LEVEL=info
+EnvironmentFile=-/etc/ussl/ussl.env
+
+[Install]
+WantedBy=multi-user.target

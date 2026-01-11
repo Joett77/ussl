@@ -11,6 +11,12 @@
 //! # Custom ports
 //! usld --tcp-port 7000 --ws-port 7001
 //!
+//! # With persistence
+//! usld --db /var/lib/ussl/data.db
+//!
+//! # With authentication
+//! usld --password mysecret
+//!
 //! # With configuration file
 //! usld --config /etc/ussl/config.toml
 //! ```
@@ -21,10 +27,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use ussl_core::DocumentManager;
+use ussl_storage::SqliteStorage;
 use ussl_transport::{TcpServer, WebSocketServer};
 
 /// USSL Daemon - Universal State Synchronization Layer
@@ -59,6 +66,14 @@ struct Args {
     /// Disable WebSocket server
     #[arg(long)]
     no_ws: bool,
+
+    /// SQLite database path for persistence (default: in-memory only)
+    #[arg(long, env = "USSL_DB")]
+    db: Option<PathBuf>,
+
+    /// Require authentication with this password
+    #[arg(long, env = "USSL_PASSWORD")]
+    password: Option<String>,
 }
 
 #[tokio::main]
@@ -89,6 +104,25 @@ async fn main() -> Result<()> {
     // Create shared document manager
     let manager = Arc::new(DocumentManager::new());
 
+    // Initialize SQLite storage if path provided
+    let storage = if let Some(db_path) = &args.db {
+        info!(path = %db_path.display(), "Initializing SQLite persistence");
+        match SqliteStorage::new(db_path) {
+            Ok(storage) => {
+                let storage = Arc::new(storage);
+                info!("SQLite persistence enabled");
+                Some(storage)
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to initialize SQLite, running in-memory only");
+                None
+            }
+        }
+    } else {
+        info!("Running in-memory only (no --db specified)");
+        None
+    };
+
     info!(
         tcp_port = args.tcp_port,
         ws_port = args.ws_port,
@@ -96,12 +130,23 @@ async fn main() -> Result<()> {
         "Starting USSL daemon"
     );
 
+    // Log auth status
+    if args.password.is_some() {
+        info!("Authentication enabled");
+    }
+
     // Start servers
     let mut handles = Vec::new();
 
     if !args.no_tcp {
         let tcp_addr: SocketAddr = format!("{}:{}", args.bind, args.tcp_port).parse()?;
-        let tcp_server = TcpServer::new(manager.clone(), tcp_addr);
+        let mut tcp_server = match &args.password {
+            Some(pwd) => TcpServer::with_password(manager.clone(), tcp_addr, pwd.clone()),
+            None => TcpServer::new(manager.clone(), tcp_addr),
+        };
+        if let Some(ref s) = storage {
+            tcp_server = tcp_server.with_storage(s.clone());
+        }
         handles.push(tokio::spawn(async move {
             if let Err(e) = tcp_server.run().await {
                 tracing::error!(error = %e, "TCP server error");
@@ -111,7 +156,13 @@ async fn main() -> Result<()> {
 
     if !args.no_ws {
         let ws_addr: SocketAddr = format!("{}:{}", args.bind, args.ws_port).parse()?;
-        let ws_server = WebSocketServer::new(manager.clone(), ws_addr);
+        let mut ws_server = match &args.password {
+            Some(pwd) => WebSocketServer::with_password(manager.clone(), ws_addr, pwd.clone()),
+            None => WebSocketServer::new(manager.clone(), ws_addr),
+        };
+        if let Some(ref s) = storage {
+            ws_server = ws_server.with_storage(s.clone());
+        }
         handles.push(tokio::spawn(async move {
             if let Err(e) = ws_server.run().await {
                 tracing::error!(error = %e, "WebSocket server error");

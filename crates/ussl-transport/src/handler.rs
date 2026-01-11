@@ -5,6 +5,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 use ussl_core::{DocumentId, DocumentManager, Strategy, Value};
 use ussl_protocol::{Command, CommandKind, Parser, Response};
+use ussl_storage::Storage;
 
 /// Handles a single client connection
 pub struct ConnectionHandler {
@@ -16,6 +17,14 @@ pub struct ConnectionHandler {
     parser: Parser,
     /// Active subscriptions (patterns)
     subscriptions: Vec<String>,
+    /// Whether auth is required
+    require_auth: bool,
+    /// Whether client is authenticated
+    authenticated: bool,
+    /// Server password (if auth required)
+    password: Option<String>,
+    /// Optional persistent storage
+    storage: Option<Arc<dyn Storage>>,
 }
 
 impl ConnectionHandler {
@@ -25,7 +34,31 @@ impl ConnectionHandler {
             manager,
             parser: Parser::new(),
             subscriptions: Vec::new(),
+            require_auth: false,
+            authenticated: true, // No auth required by default
+            password: None,
+            storage: None,
         }
+    }
+
+    /// Create a new handler with authentication required
+    pub fn with_auth(client_id: String, manager: Arc<DocumentManager>, password: String) -> Self {
+        Self {
+            client_id,
+            manager,
+            parser: Parser::new(),
+            subscriptions: Vec::new(),
+            require_auth: true,
+            authenticated: false,
+            password: Some(password),
+            storage: None,
+        }
+    }
+
+    /// Set the storage backend for persistence
+    pub fn with_storage(mut self, storage: Arc<dyn Storage>) -> Self {
+        self.storage = Some(storage);
+        self
     }
 
     /// Process incoming data and return responses
@@ -58,7 +91,23 @@ impl ConnectionHandler {
     fn handle_command(&mut self, cmd: Command) -> Response {
         debug!(client = %self.client_id, cmd = ?cmd.kind, "Processing command");
 
+        // AUTH and PING are always allowed
+        match &cmd.kind {
+            CommandKind::Auth { password } => {
+                return self.handle_auth(password.clone());
+            }
+            CommandKind::Ping => return Response::pong(),
+            CommandKind::Quit => return Response::ok_with_message("Goodbye"),
+            _ => {}
+        }
+
+        // Check authentication for all other commands
+        if self.require_auth && !self.authenticated {
+            return Response::error("NOAUTH", "Authentication required. Use AUTH <password>");
+        }
+
         match cmd.kind {
+            CommandKind::Auth { .. } => unreachable!(), // Handled above
             CommandKind::Create { strategy, ttl } => {
                 self.handle_create(cmd.document_id, strategy, ttl)
             }
@@ -86,10 +135,28 @@ impl ConnectionHandler {
             CommandKind::Presence { data } => {
                 self.handle_presence(cmd.document_id, data)
             }
-            CommandKind::Ping => Response::pong(),
-            CommandKind::Quit => Response::ok_with_message("Goodbye"),
+            CommandKind::Ping => unreachable!(), // Handled above
+            CommandKind::Quit => unreachable!(), // Handled above
             CommandKind::Info => self.handle_info(),
             CommandKind::Keys { pattern } => self.handle_keys(pattern),
+        }
+    }
+
+    fn handle_auth(&mut self, password: String) -> Response {
+        match &self.password {
+            Some(expected) if expected == &password => {
+                self.authenticated = true;
+                info!(client = %self.client_id, "Client authenticated");
+                Response::ok()
+            }
+            Some(_) => {
+                warn!(client = %self.client_id, "Authentication failed");
+                Response::error("WRONGPASS", "Invalid password")
+            }
+            None => {
+                // No password required
+                Response::ok_with_message("No authentication required")
+            }
         }
     }
 
@@ -153,6 +220,9 @@ impl ConnectionHandler {
 
         match doc.set(&path, value) {
             Ok(_) => {
+                // Persist to storage if available
+                self.persist_document(&id, &doc);
+
                 // Publish update to subscribers
                 let delta = ussl_core::manager::Delta {
                     document_id: id,
@@ -224,10 +294,13 @@ impl ConnectionHandler {
             Err(e) => return Response::error("INVALID_ID", e.to_string()),
         };
 
-        let doc = self.manager.get_or_create(id, Strategy::default());
+        let doc = self.manager.get_or_create(id.clone(), Strategy::default());
 
         match doc.push(&path, value) {
-            Ok(_) => Response::ok(),
+            Ok(_) => {
+                self.persist_document(&id, &doc);
+                Response::ok()
+            }
             Err(e) => Response::error("PUSH_ERROR", e.to_string()),
         }
     }
@@ -243,10 +316,13 @@ impl ConnectionHandler {
             Err(e) => return Response::error("INVALID_ID", e.to_string()),
         };
 
-        let doc = self.manager.get_or_create(id, Strategy::CrdtCounter);
+        let doc = self.manager.get_or_create(id.clone(), Strategy::CrdtCounter);
 
         match doc.increment(&path, delta) {
-            Ok(new_value) => Response::integer(new_value),
+            Ok(new_value) => {
+                self.persist_document(&id, &doc);
+                Response::integer(new_value)
+            }
             Err(e) => Response::error("INC_ERROR", e.to_string()),
         }
     }
@@ -300,6 +376,23 @@ impl ConnectionHandler {
             .map(|meta| Response::bulk(meta.id.as_str().as_bytes().to_vec()))
             .collect();
         Response::array(keys)
+    }
+
+    /// Persist a document to storage (if available)
+    fn persist_document(&self, id: &DocumentId, doc: &ussl_core::Document) {
+        if let Some(ref storage) = self.storage {
+            let meta = doc.meta();
+            let data = doc.encode_state();
+            let storage = storage.clone();
+            let id = id.clone();
+
+            // Spawn async task to persist
+            tokio::spawn(async move {
+                if let Err(e) = storage.store(&id, &meta, &data).await {
+                    warn!(doc_id = %id, error = %e, "Failed to persist document");
+                }
+            });
+        }
     }
 
     /// Clean up when connection closes

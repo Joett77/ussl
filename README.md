@@ -25,10 +25,19 @@ Just as Redis became the universal solution for in-memory caching, USSL aims to 
 ### Start the Server
 
 ```bash
-# Build and run
+# Build and run (in-memory only)
 cargo run --bin usld
 
-# Or with custom ports
+# With SQLite persistence
+cargo run --bin usld -- --db /var/lib/ussl/data.db
+
+# With authentication
+cargo run --bin usld -- --password mysecretpassword
+
+# With both persistence and auth
+cargo run --bin usld -- --db ./data.db --password secret123
+
+# Custom ports
 cargo run --bin usld -- --tcp-port 7000 --ws-port 7001
 ```
 
@@ -38,6 +47,9 @@ cargo run --bin usld -- --tcp-port 7000 --ws-port 7001
 # Using netcat or telnet
 nc localhost 6380
 
+# If auth is enabled, authenticate first
+AUTH mysecretpassword
+
 # Commands
 PING
 CREATE user:123 STRATEGY lww
@@ -46,6 +58,45 @@ GET user:123
 INC counter:views count 1
 SUB user:*
 QUIT
+```
+
+### Connect with ussl CLI
+
+```bash
+# Install
+cargo install --path crates/ussl-cli
+
+# Connect to local server
+ussl
+
+# Connect with authentication
+ussl -a mysecretpassword
+
+# Connect to remote server
+ussl -H example.com -p 6380 -a secret
+
+# Execute single command
+ussl -c "PING"
+ussl -a secret -c "GET user:123"
+
+# Environment variables also work
+USSL_PASSWORD=secret ussl -c "KEYS *"
+```
+
+**Interactive session:**
+```
+ussl> PING
+PONG
+ussl> SET user:1 name "Alice"
++OK
+ussl> GET user:1
+{"name": "Alice"}
+ussl> INC counter:views count 1
+1
+ussl> KEYS *
+1) user:1
+2) counter:views
+ussl> quit
 ```
 
 ### Connect with JavaScript
@@ -80,6 +131,7 @@ USSL uses a simple text-based protocol inspired by Redis:
 
 | Command | Syntax | Description |
 |---------|--------|-------------|
+| `AUTH` | `AUTH <password>` | Authenticate (required if server has --password) |
 | `CREATE` | `CREATE <id> [STRATEGY <s>] [TTL <ms>]` | Create document |
 | `GET` | `GET <id> [PATH <path>]` | Get document/path |
 | `SET` | `SET <id> <path> <value>` | Set value |
@@ -89,9 +141,10 @@ USSL uses a simple text-based protocol inspired by Redis:
 | `PUSH` | `PUSH <id> <path> <value>` | Append to array |
 | `INC` | `INC <id> <path> <delta>` | Increment counter |
 | `PRESENCE` | `PRESENCE <id> [DATA <json>]` | Set/get presence |
-| `PING` | `PING` | Health check |
+| `PING` | `PING` | Health check (always allowed) |
 | `KEYS` | `KEYS [pattern]` | List documents |
 | `INFO` | `INFO` | Server info |
+| `QUIT` | `QUIT` | Close connection (always allowed) |
 
 ### Conflict Resolution Strategies
 
@@ -141,9 +194,50 @@ ussl/
     └── collaborative.html  # Browser demo
 ```
 
-## Building
+## Installation
 
-### With Docker (Recommended)
+### Debian/Ubuntu (APT)
+
+Download the `.deb` package from [GitHub Releases](https://github.com/Joett77/ussl/releases):
+
+```bash
+# Download and install server
+wget https://github.com/Joett77/ussl/releases/latest/download/usld_0.1.0_amd64.deb
+sudo dpkg -i usld_0.1.0_amd64.deb
+
+# Download and install CLI (optional)
+wget https://github.com/Joett77/ussl/releases/latest/download/ussl-cli_0.1.0_amd64.deb
+sudo dpkg -i ussl-cli_0.1.0_amd64.deb
+
+# Start the service
+sudo systemctl enable usld
+sudo systemctl start usld
+
+# Check status
+sudo systemctl status usld
+```
+
+**Configuration file:** `/etc/ussl/ussl.toml`
+
+**Systemd commands:**
+```bash
+sudo systemctl start usld      # Start server
+sudo systemctl stop usld       # Stop server
+sudo systemctl restart usld    # Restart server
+sudo systemctl status usld     # Check status
+sudo journalctl -u usld -f     # View logs
+```
+
+**Default paths:**
+| Path | Description |
+|------|-------------|
+| `/usr/bin/usld` | Server binary |
+| `/usr/bin/ussl` | CLI client binary |
+| `/etc/ussl/ussl.toml` | Configuration file |
+| `/var/lib/ussl/` | Data directory (SQLite) |
+| `/lib/systemd/system/usld.service` | Systemd unit |
+
+### With Docker
 
 ```bash
 # Start the server
@@ -154,7 +248,7 @@ docker compose build ussl
 docker compose up ussl
 ```
 
-### With Rust (Local)
+### From Source (Rust)
 
 ```bash
 # Install Rust (if needed)
@@ -188,11 +282,182 @@ pnpm build
 | `USSL_WS_PORT` | 6381 | WebSocket port |
 | `USSL_BIND` | 0.0.0.0 | Bind address |
 | `USSL_LOG_LEVEL` | info | Log level |
+| `USSL_DB` | (none) | SQLite database path for persistence |
+| `USSL_PASSWORD` | (none) | Password for authentication |
 
 ### Command Line
 
 ```bash
-usld --tcp-port 7000 --ws-port 7001 --bind 127.0.0.1 --log-level debug
+usld [OPTIONS]
+
+Options:
+  --tcp-port <PORT>      TCP port [default: 6380] [env: USSL_TCP_PORT]
+  --ws-port <PORT>       WebSocket port [default: 6381] [env: USSL_WS_PORT]
+  --bind <ADDR>          Bind address [default: 0.0.0.0] [env: USSL_BIND]
+  --log-level <LEVEL>    Log level [default: info] [env: USSL_LOG_LEVEL]
+  --db <PATH>            SQLite database path [env: USSL_DB]
+  --password <PASS>      Require authentication [env: USSL_PASSWORD]
+  --no-tcp               Disable TCP server
+  --no-ws                Disable WebSocket server
+  -c, --config <FILE>    Configuration file path [env: USSL_CONFIG]
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+### Examples
+
+```bash
+# Development (in-memory, no auth)
+usld
+
+# Production (persistence + auth)
+usld --db /var/lib/ussl/data.db --password $USSL_PASSWORD
+
+# WebSocket only (for browser clients)
+usld --no-tcp --ws-port 8080
+
+# With environment variables
+USSL_DB=/data/ussl.db USSL_PASSWORD=secret usld
+```
+
+## Authentication
+
+When started with `--password`, the server requires authentication:
+
+1. **Without auth**: All commands work immediately
+2. **With auth**: Only `PING`, `AUTH`, and `QUIT` work before authentication
+3. **After AUTH**: All commands are available
+
+```bash
+# Server
+usld --password mysecret
+
+# Client
+nc localhost 6380
+> GET user:1
+< -ERR NOAUTH Authentication required. Use AUTH <password>
+> AUTH mysecret
+< +OK
+> GET user:1
+< $4
+< null
+```
+
+### Authentication in JavaScript
+
+```typescript
+const client = await USSL.connect('ws://localhost:6381');
+await client.auth('mysecret');  // Authenticate first
+const doc = client.doc('user:123');
+```
+
+## Persistence
+
+By default, USSL runs in-memory only. Enable SQLite persistence with `--db`:
+
+```bash
+usld --db /var/lib/ussl/data.db
+```
+
+**How it works:**
+- Documents are saved to SQLite after every write operation (`SET`, `PUSH`, `INC`)
+- On restart, documents are loaded from the database
+- The database file is created automatically if it doesn't exist
+
+**Storage backends:**
+- `memory` - Fast, volatile (default)
+- `sqlite` - Embedded persistence (single file)
+- `postgres` - Scalable persistence (planned for v1.0)
+
+## Benchmarking
+
+USSL includes a built-in benchmark tool to test performance under load.
+
+### Running Benchmarks
+
+```bash
+# Start the server (in release mode for accurate results)
+cargo run --bin usld --release
+
+# Run benchmark with default settings (10 clients, 1000 ops each)
+cargo run --example benchmark --release
+
+# Custom configuration
+cargo run --example benchmark --release -- -c 50 -n 5000
+
+# With authentication
+cargo run --example benchmark --release -- -a mysecret -c 20 -n 2000
+```
+
+### Benchmark Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-H, --host` | Server hostname | 127.0.0.1 |
+| `-p, --port` | Server port | 6380 |
+| `-a, --password` | Authentication password | (none) |
+| `-c, --clients` | Number of concurrent clients | 10 |
+| `-n, --ops` | Operations per client | 1000 |
+
+### What It Tests
+
+1. **Connection Benchmark** - Tests how many concurrent connections can be established
+2. **SET Benchmark** - Write throughput (ops/sec)
+3. **GET Benchmark** - Read throughput (ops/sec)
+4. **INC Benchmark** - Counter increment throughput
+5. **Mixed Benchmark** - 40% SET + 40% GET + 20% INC workload
+
+### Benchmark Results
+
+> **Note:** Results vary based on hardware, OS, and virtualization. Tests below were run on Docker
+> (rust:1.75-slim-bookworm) on Windows/WSL2, which adds overhead. Native Linux typically achieves
+> 30-50% higher throughput and lower latency.
+
+**Test environment:**
+- Docker container: `rust:1.75-slim-bookworm`
+- Host: Windows 10 + WSL2 + Docker Desktop
+- CPU: Shared with host system
+- Network: Docker virtual bridge (adds latency)
+
+#### Light Load (10 clients × 1,000 ops = 10,000 operations)
+
+| Operation | Throughput | Avg Latency | Success Rate |
+|-----------|------------|-------------|--------------|
+| **Connection** | 1,796 conn/sec | 557 µs | 100% |
+| **SET** | 9,417 ops/sec | 1,042 µs | 100% |
+| **GET** | 88,973 ops/sec | 76 µs | 100% |
+| **INC** | 10,655 ops/sec | 925 µs | 100% |
+| **MIXED** | 15,265 ops/sec | 566 µs | 100% |
+
+#### Heavy Load (50 clients × 2,000 ops = 100,000 operations)
+
+| Operation | Throughput | Avg Latency | Success Rate |
+|-----------|------------|-------------|--------------|
+| **Connection** | 2,764 conn/sec | 362 µs | 100% |
+| **SET** | 12,710 ops/sec | 3.9 ms | 100% |
+| **GET** | 225,791 ops/sec | 189 µs | 100% |
+| **INC** | 25,255 ops/sec | 1.9 ms | 100% |
+| **MIXED** | 10,090 ops/sec | 4 ms | 100% |
+
+**Key observations:**
+- **GET operations** are extremely fast (225K+ ops/sec) due to in-memory storage
+- **SET/INC operations** maintain 10-25K ops/sec with CRDT overhead
+- **Zero failures** under heavy concurrent load
+- System scales well with increased client count
+
+### Example Output
+
+```
+╔══════════════════════════════════════════════════════════╗
+║  GET Benchmark (50 clients × 2000 ops)
+╠══════════════════════════════════════════════════════════╣
+║  Total operations:        100000
+║  Successful:              100000
+║  Failed:                       0
+║  Duration:              442.89ms
+║  Throughput:            225791 ops/sec
+║  Avg latency:              189 µs
+╚══════════════════════════════════════════════════════════╝
 ```
 
 ## Roadmap
@@ -202,7 +467,9 @@ usld --tcp-port 7000 --ws-port 7001 --bind 127.0.0.1 --log-level debug
 - [x] v0.1 - JavaScript/TypeScript SDK
 - [x] v0.1 - CLI client tool
 - [x] v0.1 - Docker support
-- [ ] v0.5 - SQLite persistence, Python SDK
+- [x] v0.2 - SQLite persistence
+- [x] v0.2 - Authentication (AUTH command)
+- [ ] v0.5 - Python SDK, config file support
 - [ ] v1.0 - Production-ready, PostgreSQL, WASM
 - [ ] v1.1 - S3 storage, Swift SDK
 - [ ] v2.0 - Multi-node clustering

@@ -9,6 +9,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 use ussl_core::DocumentManager;
 use ussl_protocol::Response;
+use ussl_storage::Storage;
 
 use crate::handler::ConnectionHandler;
 
@@ -17,6 +18,8 @@ pub struct TcpServer {
     manager: Arc<DocumentManager>,
     addr: SocketAddr,
     client_counter: AtomicU64,
+    password: Option<String>,
+    storage: Option<Arc<dyn Storage>>,
 }
 
 impl TcpServer {
@@ -25,7 +28,26 @@ impl TcpServer {
             manager,
             addr,
             client_counter: AtomicU64::new(0),
+            password: None,
+            storage: None,
         }
+    }
+
+    /// Create a server with authentication required
+    pub fn with_password(manager: Arc<DocumentManager>, addr: SocketAddr, password: String) -> Self {
+        Self {
+            manager,
+            addr,
+            client_counter: AtomicU64::new(0),
+            password: Some(password),
+            storage: None,
+        }
+    }
+
+    /// Set the storage backend for persistence
+    pub fn with_storage(mut self, storage: Arc<dyn Storage>) -> Self {
+        self.storage = Some(storage);
+        self
     }
 
     /// Start the TCP server
@@ -42,9 +64,11 @@ impl TcpServer {
                         self.client_counter.fetch_add(1, Ordering::Relaxed)
                     );
                     let manager = self.manager.clone();
+                    let password = self.password.clone();
+                    let storage = self.storage.clone();
 
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_connection(stream, client_id.clone(), manager).await {
+                        if let Err(e) = Self::handle_connection(stream, client_id.clone(), manager, password, storage).await {
                             error!(client = %client_id, error = %e, "Connection error");
                         }
                     });
@@ -60,10 +84,19 @@ impl TcpServer {
         mut stream: TcpStream,
         client_id: String,
         manager: Arc<DocumentManager>,
+        password: Option<String>,
+        storage: Option<Arc<dyn Storage>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!(client = %client_id, "Client connected");
 
-        let mut handler = ConnectionHandler::new(client_id.clone(), manager);
+        let handler = match password {
+            Some(pwd) => ConnectionHandler::with_auth(client_id.clone(), manager, pwd),
+            None => ConnectionHandler::new(client_id.clone(), manager),
+        };
+        let mut handler = match storage {
+            Some(s) => handler.with_storage(s),
+            None => handler,
+        };
         let mut buf = vec![0u8; 4096];
         let mut update_rx = handler.subscribe_updates();
 
@@ -142,7 +175,7 @@ mod tests {
         let manager_clone = manager.clone();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            TcpServer::handle_connection(stream, "test".into(), manager_clone).await.unwrap();
+            TcpServer::handle_connection(stream, "test".into(), manager_clone, None, None).await.unwrap();
         });
 
         // Connect client

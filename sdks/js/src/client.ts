@@ -137,6 +137,17 @@ export class USSLClient {
   }
 
   /**
+   * Authenticate with the server
+   * Required if server was started with --password
+   */
+  async auth(password: string): Promise<void> {
+    const response = await this.send(`AUTH ${password}`);
+    if (!response.startsWith('+OK')) {
+      throw new Error('Authentication failed');
+    }
+  }
+
+  /**
    * Get or create a document
    */
   doc(id: string, options: DocumentOptions = {}): Document {
