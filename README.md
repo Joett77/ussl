@@ -470,6 +470,33 @@ cargo run --example benchmark --release -- -a mysecret -c 20 -n 2000
 ╚══════════════════════════════════════════════════════════╝
 ```
 
+## APT Repository Setup (Maintainers)
+
+To enable `apt-get install usld`, the repository needs:
+
+### 1. Create GPG Key
+```bash
+gpg --full-generate-key   # RSA 4096, no expiration
+gpg --armor --export-secret-keys YOUR_KEY_ID > private.key
+```
+
+### 2. Add GitHub Secret
+Go to Settings > Secrets > Actions and add:
+- Name: `GPG_PRIVATE_KEY`
+- Value: contents of `private.key`
+
+### 3. Enable GitHub Pages
+Go to Settings > Pages:
+- Source: **GitHub Actions**
+
+### 4. Trigger Workflow
+The APT repository is built automatically on each release, or manually via Actions > APT Repository > Run workflow.
+
+After setup, users can install with:
+```bash
+curl -fsSL https://joett77.github.io/ussl/install.sh | bash
+```
+
 ## Roadmap
 
 - [x] v0.1 - Core engine, LWW strategy, memory storage, TCP, WebSocket
@@ -479,6 +506,10 @@ cargo run --example benchmark --release -- -a mysecret -c 20 -n 2000
 - [x] v0.1 - Docker support
 - [x] v0.2 - SQLite persistence
 - [x] v0.2 - Authentication (AUTH command)
+- [x] v0.2 - APT/DEB packaging with systemd
+- [x] v0.2 - Load testing benchmark tool
+- [x] v0.2 - CLI improvements (env vars, auth flag)
+- [ ] v0.3 - APT repository on GitHub Pages
 - [ ] v0.5 - Python SDK, config file support
 - [ ] v1.0 - Production-ready, PostgreSQL, WASM
 - [ ] v1.1 - S3 storage, Swift SDK
