@@ -52,16 +52,14 @@ jobs:
       - name: Create Release file
         run: |
           cd apt-repo/dists/stable
-          cat > Release << 'RELEASE_EOF'
-          Origin: USSL
-          Label: USSL
-          Suite: stable
-          Codename: stable
-          Version: 1.0
-          Architectures: amd64
-          Components: main
-          Description: USSL - Universal State Synchronization Layer
-          RELEASE_EOF
+          echo "Origin: USSL" > Release
+          echo "Label: USSL" >> Release
+          echo "Suite: stable" >> Release
+          echo "Codename: stable" >> Release
+          echo "Version: 1.0" >> Release
+          echo "Architectures: amd64" >> Release
+          echo "Components: main" >> Release
+          echo "Description: USSL - Universal State Synchronization Layer" >> Release
           echo "MD5Sum:" >> Release
           for f in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
             echo " $(md5sum $f | cut -d' ' -f1) $(wc -c < $f) $f" >> Release
@@ -82,7 +80,7 @@ jobs:
 
       - name: Create install script
         run: |
-          cat > apt-repo/install.sh << 'INSTALL_EOF'
+          cat > apt-repo/install.sh << 'SCRIPT'
           #!/bin/bash
           set -e
           echo "Installing USSL APT repository..."
@@ -94,33 +92,33 @@ jobs:
           echo "USSL installed successfully!"
           echo "Start the server: sudo systemctl start usld"
           echo "Install CLI: sudo apt-get install ussl-cli"
-          INSTALL_EOF
+          SCRIPT
           chmod +x apt-repo/install.sh
 
       - name: Create index.html
         run: |
-          cat > apt-repo/index.html << 'HTML_EOF'
+          cat > apt-repo/index.html << 'HTMLPAGE'
           <!DOCTYPE html>
           <html>
           <head>
-            <title>USSL APT Repository</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-              pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
-              code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
-              h1 { color: #333; }
-              .install-cmd { background: #2d3748; color: #fff; padding: 15px; border-radius: 5px; }
-            </style>
+          <title>USSL APT Repository</title>
+          <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+          pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+          code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+          h1 { color: #333; }
+          .install-cmd { background: #2d3748; color: #fff; padding: 15px; border-radius: 5px; }
+          </style>
           </head>
           <body>
-            <h1>USSL APT Repository</h1>
-            <p>Universal State Synchronization Layer - state sync with CRDTs</p>
-            <h2>Quick Install</h2>
-            <div class="install-cmd">
-              <code>curl -fsSL https://joett77.github.io/ussl/install.sh | bash</code>
-            </div>
-            <h2>Manual Installation</h2>
-            <pre>
+          <h1>USSL APT Repository</h1>
+          <p>Universal State Synchronization Layer - state sync with CRDTs</p>
+          <h2>Quick Install</h2>
+          <div class="install-cmd">
+          <code>curl -fsSL https://joett77.github.io/ussl/install.sh | bash</code>
+          </div>
+          <h2>Manual Installation</h2>
+          <pre>
           # Add GPG key
           curl -fsSL https://joett77.github.io/ussl/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/ussl-archive-keyring.gpg
 
@@ -130,20 +128,20 @@ jobs:
           # Install
           sudo apt-get update
           sudo apt-get install usld ussl-cli
-            </pre>
-            <h2>Available Packages</h2>
-            <ul>
-              <li><code>usld</code> - USSL Server daemon</li>
-              <li><code>ussl-cli</code> - USSL Command-line client</li>
-            </ul>
-            <h2>Links</h2>
-            <ul>
-              <li><a href="https://github.com/Joett77/ussl">GitHub Repository</a></li>
-              <li><a href="https://github.com/Joett77/ussl/releases">Releases</a></li>
-            </ul>
+          </pre>
+          <h2>Available Packages</h2>
+          <ul>
+          <li><code>usld</code> - USSL Server daemon</li>
+          <li><code>ussl-cli</code> - USSL Command-line client</li>
+          </ul>
+          <h2>Links</h2>
+          <ul>
+          <li><a href="https://github.com/Joett77/ussl">GitHub Repository</a></li>
+          <li><a href="https://github.com/Joett77/ussl/releases">Releases</a></li>
+          </ul>
           </body>
           </html>
-          HTML_EOF
+          HTMLPAGE
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
