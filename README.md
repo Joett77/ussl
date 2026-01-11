@@ -497,6 +497,85 @@ After setup, users can install with:
 curl -fsSL https://joett77.github.io/ussl/install.sh | bash
 ```
 
+## Use Cases
+
+### 1. Multiplayer Games
+
+When players interact in real-time, USSL handles state synchronization automatically:
+
+```
+Player A builds wall  -->  USSL  -->  Player B sees wall instantly
+Player B places door  -->  USSL  -->  Player A sees door instantly
+Both edit same spot   -->  USSL  -->  Conflict resolved automatically
+```
+
+**Benefits:** No custom sync code, offline play works, automatic conflict resolution.
+
+### 2. Collaborative Documents
+
+Multiple users editing the same document simultaneously:
+
+```
+Alice types at home    --\
+Bob types at office    ---+--> USSL --> Everyone sees all changes
+Carol types on phone   --/
+```
+
+**Benefits:** Real-time collaboration, works offline (syncs when back online).
+
+### 3. Shared Shopping Lists
+
+Family members can add items from different devices:
+
+```
+Mom adds: milk     --\
+Dad adds: bread    ---+--> USSL --> Complete list: milk, bread, eggs
+Kid adds: eggs     --/
+```
+
+**Benefits:** No lost items, works without internet, syncs automatically.
+
+## Why USSL?
+
+### Comparison with Alternatives
+
+| Solution | Sync | CRDT | Offline | Self-hosted | Complexity |
+|----------|------|------|---------|-------------|------------|
+| **USSL** | Yes | Yes | Yes | Yes | Low |
+| Firebase | Yes | No | Partial | No | Low |
+| Redis | No | No | No | Yes | Low |
+| CouchDB | Yes | No | Yes | Yes | High |
+| Yjs (library) | Yes | Yes | Yes | N/A | Medium |
+
+### What Makes USSL Different
+
+USSL combines:
+- **Speed of Redis** - Simple protocol, single binary
+- **CRDTs of Yjs** - Automatic conflict resolution
+- **Offline-first of CouchDB** - Without the complexity
+- **Open source** - No vendor lock-in
+
+## Commercial Use
+
+USSL is MIT/Apache-2.0 licensed. You can use it freely in commercial projects.
+
+### Business Models
+
+| Model | Description |
+|-------|-------------|
+| **Cloud Hosting** | Offer managed USSL instances (like Redis Labs) |
+| **Enterprise License** | Premium features + support |
+| **Consulting** | Integration and training services |
+
+### Example Pricing (for cloud service)
+
+| Tier | Price | Features |
+|------|-------|----------|
+| Free | $0 | 1 document, 1K ops/day |
+| Pro | $29/mo | 1000 docs, 1M ops |
+| Business | $199/mo | Unlimited, SLA 99.9% |
+| Enterprise | Custom | Multi-node, SSO, support |
+
 ## Roadmap
 
 - [x] v0.1 - Core engine, LWW strategy, memory storage, TCP, WebSocket
