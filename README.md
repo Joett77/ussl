@@ -8,7 +8,7 @@
 
 USSL solves one of the most pervasive problems in modern distributed systems: **keeping state synchronized** across services, clients, and devices with automatic conflict resolution, offline support, and configurable consistency guarantees.
 
-Just as Redis became the universal solution for in-memory caching, USSL aims to become the universal solution for **state synchronization**.
+**USSL is not a Redis competitor** - they solve different problems. Redis is for caching, USSL is for synchronization. You might use both together: Redis for cache, USSL for keeping clients in sync.
 
 ## Features
 
@@ -535,46 +535,76 @@ Kid adds: eggs     --/
 
 **Benefits:** No lost items, works without internet, syncs automatically.
 
+## Architecture
+
+USSL is a **centralized state database** that all clients connect to directly:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      YOUR SERVER                            │
+│                                                             │
+│    ┌─────────────────────────────────────────────────┐     │
+│    │              USSL Server (usld)                 │     │
+│    │         port 6380 (TCP) / 6381 (WS)             │     │
+│    │                                                 │     │
+│    │   Documents:                                    │     │
+│    │   - user:123  {name: "Alice", ...}              │     │
+│    │   - game:456  {score: 100, ...}                 │     │
+│    │   - chat:789  {messages: [...]}                 │     │
+│    └─────────────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+           ▲              ▲              ▲
+           │              │              │
+      ┌────┴────┐    ┌────┴────┐    ┌────┴────┐
+      │ iOS App │    │ Browser │    │ Backend │
+      │   (WS)  │    │   (WS)  │    │  (TCP)  │
+      └─────────┘    └─────────┘    └─────────┘
+```
+
+**Flow:**
+1. Client connects (WebSocket or TCP)
+2. Authenticates with `AUTH password`
+3. Reads/writes with `GET`, `SET`, `INC`
+4. Subscribes to changes with `SUB user:*`
+5. Receives real-time updates when others modify data
+
+## USSL vs Redis
+
+**They are NOT competitors** - they solve different problems:
+
+| Aspect | Redis | USSL |
+|--------|-------|------|
+| **Purpose** | Caching, pub/sub, queues | State synchronization |
+| **Conflict resolution** | Last write wins (data loss) | CRDT (no data loss) |
+| **Offline support** | No | Yes |
+| **Client sync** | Manual (pub/sub) | Automatic |
+| **Use together?** | Yes! Redis for cache, USSL for sync |
+
+**Example: E-commerce app**
+```
+Redis  → Cache product catalog (fast reads)
+USSL   → Sync shopping cart across devices (no lost items)
+```
+
 ## Why USSL?
 
 ### Comparison with Alternatives
 
-| Solution | Sync | CRDT | Offline | Self-hosted | Complexity |
-|----------|------|------|---------|-------------|------------|
+| Solution | Real-time Sync | CRDT | Offline | Self-hosted | Complexity |
+|----------|----------------|------|---------|-------------|------------|
 | **USSL** | Yes | Yes | Yes | Yes | Low |
 | Firebase | Yes | No | Partial | No | Low |
-| Redis | No | No | No | Yes | Low |
+| Redis | No (pub/sub only) | No | No | Yes | Low |
 | CouchDB | Yes | No | Yes | Yes | High |
 | Yjs (library) | Yes | Yes | Yes | N/A | Medium |
 
 ### What Makes USSL Different
 
-USSL combines:
-- **Speed of Redis** - Simple protocol, single binary
-- **CRDTs of Yjs** - Automatic conflict resolution
+USSL uniquely combines:
+- **Simplicity of Redis** - Simple protocol, single binary, zero-config start
+- **CRDTs of Yjs** - Automatic conflict resolution without data loss
 - **Offline-first of CouchDB** - Without the complexity
-- **Open source** - No vendor lock-in
-
-## Commercial Use
-
-USSL is MIT/Apache-2.0 licensed. You can use it freely in commercial projects.
-
-### Business Models
-
-| Model | Description |
-|-------|-------------|
-| **Cloud Hosting** | Offer managed USSL instances (like Redis Labs) |
-| **Enterprise License** | Premium features + support |
-| **Consulting** | Integration and training services |
-
-### Example Pricing (for cloud service)
-
-| Tier | Price | Features |
-|------|-------|----------|
-| Free | $0 | 1 document, 1K ops/day |
-| Pro | $29/mo | 1000 docs, 1M ops |
-| Business | $199/mo | Unlimited, SLA 99.9% |
-| Enterprise | Custom | Multi-node, SSO, support |
+- **Open source** - No vendor lock-in, self-hosted
 
 ## Roadmap
 
@@ -588,7 +618,7 @@ USSL is MIT/Apache-2.0 licensed. You can use it freely in commercial projects.
 - [x] v0.2 - APT/DEB packaging with systemd
 - [x] v0.2 - Load testing benchmark tool
 - [x] v0.2 - CLI improvements (env vars, auth flag)
-- [ ] v0.3 - APT repository on GitHub Pages
+- [x] v0.2 - APT repository on GitHub Pages
 - [ ] v0.5 - Python SDK, config file support
 - [ ] v1.0 - Production-ready, PostgreSQL, WASM
 - [ ] v1.1 - S3 storage, Swift SDK
