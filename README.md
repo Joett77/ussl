@@ -198,23 +198,33 @@ ussl/
 
 ### Debian/Ubuntu (APT)
 
-Download the `.deb` package from [GitHub Releases](https://github.com/Joett77/ussl/releases):
-
+**Quick install (one-liner):**
 ```bash
-# Download and install server
-wget https://github.com/Joett77/ussl/releases/latest/download/usld_0.1.0_amd64.deb
-sudo dpkg -i usld_0.1.0_amd64.deb
+curl -fsSL https://joett77.github.io/ussl/install.sh | bash
+```
 
-# Download and install CLI (optional)
-wget https://github.com/Joett77/ussl/releases/latest/download/ussl-cli_0.1.0_amd64.deb
-sudo dpkg -i ussl-cli_0.1.0_amd64.deb
+**Manual APT repository setup:**
+```bash
+# Add GPG key
+curl -fsSL https://joett77.github.io/ussl/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/ussl-archive-keyring.gpg
+
+# Add repository
+echo "deb [signed-by=/usr/share/keyrings/ussl-archive-keyring.gpg] https://joett77.github.io/ussl stable main" | sudo tee /etc/apt/sources.list.d/ussl.list
+
+# Install
+sudo apt-get update
+sudo apt-get install usld ussl-cli
 
 # Start the service
 sudo systemctl enable usld
 sudo systemctl start usld
+```
 
-# Check status
-sudo systemctl status usld
+**Alternative: Download .deb directly**
+```bash
+# From GitHub Releases
+wget https://github.com/Joett77/ussl/releases/latest/download/usld_0.2.0_amd64.deb
+sudo dpkg -i usld_0.2.0_amd64.deb
 ```
 
 **Configuration file:** `/etc/ussl/ussl.toml`

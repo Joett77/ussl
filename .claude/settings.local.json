@@ -5,7 +5,9 @@
       "Bash(powershell.exe -Command \"cd ''c:\\\\Users\\\\Giuseppe\\\\Documents\\\\GitHub\\\\ussl''; cargo build 2>&1\")",
       "Bash(reg query \"HKEY_CURRENT_USER\\\\Environment\" /v Path)",
       "Bash(where.exe cargo:*)",
-      "Bash(docker cp:*)"
+      "Bash(docker cp:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

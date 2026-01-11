@@ -1,0 +1,176 @@
+name: APT Repository
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-repo:
+    name: Build APT Repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev gpg
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Build .deb packages
+        run: |
+          cargo deb -p usld
+          cargo deb -p ussl-cli
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          gpg --list-keys
+
+      - name: Create APT repository structure
+        run: |
+          mkdir -p apt-repo/pool/main
+          mkdir -p apt-repo/dists/stable/main/binary-amd64
+
+          # Copy .deb files
+          cp target/debian/*.deb apt-repo/pool/main/
+
+          # Generate Packages file
+          cd apt-repo
+          dpkg-scanpackages pool/main /dev/null > dists/stable/main/binary-amd64/Packages
+          gzip -k dists/stable/main/binary-amd64/Packages
+
+          # Create Release file
+          cat > dists/stable/Release << EOF
+          Origin: USSL
+          Label: USSL
+          Suite: stable
+          Codename: stable
+          Version: 1.0
+          Architectures: amd64
+          Components: main
+          Description: USSL - Universal State Synchronization Layer
+          EOF
+
+          # Add checksums to Release
+          cd dists/stable
+          echo "MD5Sum:" >> Release
+          for f in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
+            echo " $(md5sum $f | cut -d' ' -f1) $(wc -c < $f) $f" >> Release
+          done
+          echo "SHA256:" >> Release
+          for f in main/binary-amd64/Packages main/binary-amd64/Packages.gz; do
+            echo " $(sha256sum $f | cut -d' ' -f1) $(wc -c < $f) $f" >> Release
+          done
+
+      - name: Sign Release file
+        run: |
+          cd apt-repo/dists/stable
+          gpg --batch --yes --armor --detach-sign -o Release.gpg Release
+          gpg --batch --yes --clearsign -o InRelease Release
+
+      - name: Export public key
+        run: |
+          gpg --armor --export > apt-repo/KEY.gpg
+
+      - name: Create install script
+        run: |
+          cat > apt-repo/install.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          echo "Installing USSL APT repository..."
+
+          # Add GPG key
+          curl -fsSL https://joett77.github.io/ussl/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/ussl-archive-keyring.gpg
+
+          # Add repository
+          echo "deb [signed-by=/usr/share/keyrings/ussl-archive-keyring.gpg] https://joett77.github.io/ussl stable main" | sudo tee /etc/apt/sources.list.d/ussl.list
+
+          # Update and install
+          sudo apt-get update
+          sudo apt-get install -y usld
+
+          echo ""
+          echo "USSL installed successfully!"
+          echo "Start the server: sudo systemctl start usld"
+          echo "Install CLI: sudo apt-get install ussl-cli"
+          EOF
+          chmod +x apt-repo/install.sh
+
+      - name: Create index.html
+        run: |
+          cat > apt-repo/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <title>USSL APT Repository</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+              pre { background: #f4f4f4; padding: 15px; border-radius: 5px; overflow-x: auto; }
+              code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+              h1 { color: #333; }
+              .install-cmd { background: #2d3748; color: #fff; padding: 15px; border-radius: 5px; }
+            </style>
+          </head>
+          <body>
+            <h1>USSL APT Repository</h1>
+            <p>Universal State Synchronization Layer - Redis-like state sync with CRDTs</p>
+
+            <h2>Quick Install</h2>
+            <div class="install-cmd">
+              <code>curl -fsSL https://joett77.github.io/ussl/install.sh | bash</code>
+            </div>
+
+            <h2>Manual Installation</h2>
+            <pre>
+# Add GPG key
+curl -fsSL https://joett77.github.io/ussl/KEY.gpg | sudo gpg --dearmor -o /usr/share/keyrings/ussl-archive-keyring.gpg
+
+# Add repository
+echo "deb [signed-by=/usr/share/keyrings/ussl-archive-keyring.gpg] https://joett77.github.io/ussl stable main" | sudo tee /etc/apt/sources.list.d/ussl.list
+
+# Install
+sudo apt-get update
+sudo apt-get install usld ussl-cli
+            </pre>
+
+            <h2>Available Packages</h2>
+            <ul>
+              <li><code>usld</code> - USSL Server daemon</li>
+              <li><code>ussl-cli</code> - USSL Command-line client</li>
+            </ul>
+
+            <h2>Links</h2>
+            <ul>
+              <li><a href="https://github.com/Joett77/ussl">GitHub Repository</a></li>
+              <li><a href="https://github.com/Joett77/ussl/releases">Releases</a></li>
+            </ul>
+          </body>
+          </html>
+          EOF
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apt-repo
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
