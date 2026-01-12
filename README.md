@@ -864,6 +864,43 @@ USSL uniquely combines:
 - **Offline-first of CouchDB** - Without the complexity
 - **Open source** - No vendor lock-in, self-hosted
 
+## Limitations
+
+USSL is designed for specific use cases. Be aware of these limitations:
+
+### Current Limitations (v0.x)
+
+| Limitation | Status | Planned |
+|------------|--------|---------|
+| **Single node only** | No clustering | v2.0 |
+| **No TLS** | Plaintext only | v1.0 |
+| **Simple auth** | Password only, no ACL | v1.0 |
+| **No transactions** | Eventual consistency | By design |
+
+### Not Suited For
+
+- **Banking/financial transactions** - USSL uses eventual consistency, not ACID transactions
+- **Strong consistency requirements** - If you need "read your own writes" guarantees, use PostgreSQL
+- **Very large documents** - CRDT overhead grows with document history; keep documents under 1MB
+- **High-security environments** - No TLS yet, simple password auth only
+
+### Suited For
+
+- Real-time collaboration (docs, whiteboards, games)
+- IoT state synchronization
+- Mobile apps with offline support
+- Prototypes and MVPs
+- Internal tools and dashboards
+
+### Scalability
+
+Current single-node limits (approximate):
+- **Connections**: ~10,000 concurrent (depends on hardware)
+- **Documents**: Limited by RAM (in-memory) or disk (SQLite)
+- **Throughput**: ~200K reads/sec, ~25K writes/sec (see benchmarks)
+
+For higher scale, wait for v2.0 clustering or run multiple sharded instances.
+
 ## Integration Guide
 
 USSL is a database service - your applications connect to it explicitly, just like Redis, PostgreSQL, or MongoDB.

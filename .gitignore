@@ -41,3 +41,8 @@ coverage/
 # Environment
 .env
 .env.local
+
+# Private documentation
+*.private.md
+BUSINESS.md
+docs/private/
