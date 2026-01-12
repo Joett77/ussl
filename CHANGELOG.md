@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Returns `-ERR RATE_LIMITED` when limit exceeded
   - PING/QUIT commands are exempt from rate limiting
 
+- **Backup/Restore** - Export and import all documents
+  - `BACKUP` - Export all documents as JSON (includes state, strategy, TTL)
+  - `RESTORE <json>` - Import documents from backup, returns count restored
+  - Preserves CRDT state for accurate synchronization after restore
+  - TTL is preserved as remaining time from backup moment
+
 ## [0.3.0] - 2025-01-12
 
 ### Added

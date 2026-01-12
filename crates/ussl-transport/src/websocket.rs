@@ -8,7 +8,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use ussl_core::DocumentManager;
 use ussl_protocol::Response;
 use ussl_storage::Storage;

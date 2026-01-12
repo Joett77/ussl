@@ -92,6 +92,14 @@ pub enum CommandKind {
 
     /// TTL <id> - Get remaining TTL for a document
     Ttl,
+
+    /// BACKUP - Export all documents as JSON
+    Backup,
+
+    /// RESTORE <json> - Import documents from JSON backup
+    Restore {
+        data: String,
+    },
 }
 
 impl Command {
@@ -211,6 +219,20 @@ impl Command {
         Command {
             kind: CommandKind::Ttl,
             document_id: Some(id),
+        }
+    }
+
+    pub fn backup() -> Self {
+        Command {
+            kind: CommandKind::Backup,
+            document_id: None,
+        }
+    }
+
+    pub fn restore(data: String) -> Self {
+        Command {
+            kind: CommandKind::Restore { data },
+            document_id: None,
         }
     }
 }

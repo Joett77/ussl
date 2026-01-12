@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tracing::{debug, error, info, warn};
-use ussl_core::{DocumentId, DocumentManager, Strategy, Value};
+use tracing::{debug, info, warn};
+use ussl_core::{Backup, DocumentId, DocumentManager, Strategy, Value};
 use ussl_protocol::{Command, CommandKind, Parser, Response};
 use ussl_storage::Storage;
 use crate::rate_limit::{RateLimiter, RateLimitConfig};
@@ -167,6 +167,8 @@ impl ConnectionHandler {
             CommandKind::Compact => self.handle_compact(cmd.document_id),
             CommandKind::Expire { ttl_ms } => self.handle_expire(cmd.document_id, ttl_ms),
             CommandKind::Ttl => self.handle_ttl(cmd.document_id),
+            CommandKind::Backup => self.handle_backup(),
+            CommandKind::Restore { data } => self.handle_restore(data),
         }
     }
 
@@ -497,6 +499,53 @@ impl ConnectionHandler {
                 Response::integer(-1)
             }
             Err(_) => Response::not_found(&id_str),
+        }
+    }
+
+    fn handle_backup(&self) -> Response {
+        let backup = self.manager.backup();
+        match serde_json::to_vec(&backup) {
+            Ok(json) => {
+                info!(
+                    documents = backup.documents.len(),
+                    timestamp = backup.timestamp,
+                    "Backup created"
+                );
+                Response::bulk(json)
+            }
+            Err(e) => Response::error("BACKUP_ERROR", e.to_string()),
+        }
+    }
+
+    fn handle_restore(&self, data: String) -> Response {
+        let backup: Backup = match serde_json::from_str(&data) {
+            Ok(b) => b,
+            Err(e) => return Response::error("INVALID_JSON", e.to_string()),
+        };
+
+        match self.manager.restore(&backup) {
+            Ok(count) => {
+                info!(
+                    documents = count,
+                    version = backup.version,
+                    timestamp = backup.timestamp,
+                    "Restore completed"
+                );
+
+                // Persist all restored documents to storage
+                if self.storage.is_some() {
+                    for doc_backup in &backup.documents {
+                        if let Ok(id) = DocumentId::new(&doc_backup.id) {
+                            if let Ok(doc) = self.manager.get(&id) {
+                                self.persist_document(&id, &doc);
+                            }
+                        }
+                    }
+                }
+
+                Response::integer(count as i64)
+            }
+            Err(e) => Response::error("RESTORE_ERROR", e.to_string()),
         }
     }
 

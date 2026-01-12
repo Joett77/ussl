@@ -4,6 +4,7 @@ use crate::crdt::Strategy;
 use crate::document::{Document, DocumentId, DocumentMeta};
 use crate::error::{Error, Result};
 use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -221,6 +222,66 @@ impl DocumentManager {
 
         key == pattern
     }
+
+    /// Create a backup of all documents
+    pub fn backup(&self) -> Backup {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let documents: Vec<DocumentBackup> = self
+            .documents
+            .iter()
+            .filter(|entry| !entry.value().is_expired())
+            .map(|entry| {
+                let doc = entry.value();
+                DocumentBackup {
+                    id: entry.key().clone(),
+                    strategy: doc.strategy().to_string(),
+                    state: doc.encode_state(),
+                    ttl_remaining_ms: doc.ttl_remaining(),
+                }
+            })
+            .collect();
+
+        Backup {
+            version: 1,
+            timestamp,
+            documents,
+        }
+    }
+
+    /// Restore documents from a backup
+    /// Returns the number of documents restored
+    pub fn restore(&self, backup: &Backup) -> Result<usize> {
+        let mut restored = 0;
+
+        for doc_backup in &backup.documents {
+            let id = DocumentId::new(&doc_backup.id)?;
+            let strategy: Strategy = doc_backup.strategy.parse()
+                .map_err(|_| Error::InvalidStrategy(doc_backup.strategy.clone()))?;
+
+            // Create document with TTL if it had one
+            let ttl = doc_backup.ttl_remaining_ms
+                .filter(|&t| t > 0)
+                .map(|t| t as u64);
+
+            let doc = match ttl {
+                Some(ttl_ms) => Document::with_ttl(id.clone(), strategy, ttl_ms),
+                None => Document::new(id.clone(), strategy),
+            };
+
+            // Restore the state
+            doc.apply_state(&doc_backup.state)?;
+
+            // Insert into manager (overwrite if exists)
+            self.documents.insert(doc_backup.id.clone(), Arc::new(doc));
+            restored += 1;
+        }
+
+        Ok(restored)
+    }
 }
 
 impl Default for DocumentManager {
@@ -234,6 +295,23 @@ impl Default for DocumentManager {
 pub struct ManagerStats {
     pub document_count: usize,
     pub subscriber_count: usize,
+}
+
+/// Backup format for a single document
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentBackup {
+    pub id: String,
+    pub strategy: String,
+    pub state: Vec<u8>,
+    pub ttl_remaining_ms: Option<i64>,
+}
+
+/// Full backup containing all documents
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Backup {
+    pub version: u32,
+    pub timestamp: u64,
+    pub documents: Vec<DocumentBackup>,
 }
 
 #[cfg(test)]

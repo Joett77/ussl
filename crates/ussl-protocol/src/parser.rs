@@ -86,6 +86,8 @@ impl Parser {
             "COMPACT" => Self::parse_compact(&mut tokens),
             "EXPIRE" => Self::parse_expire(&mut tokens),
             "TTL" => Self::parse_ttl(&mut tokens),
+            "BACKUP" => Ok(Command::backup()),
+            "RESTORE" => Self::parse_restore(&mut tokens),
             _ => Err(ProtocolError::InvalidCommand(format!("Unknown command: {}", cmd))),
         }
     }
@@ -287,6 +289,17 @@ impl Parser {
         let id = tokens.next()
             .ok_or_else(|| ProtocolError::MissingArgument("document_id".into()))?;
         Ok(Command::ttl(id.to_string()))
+    }
+
+    fn parse_restore(tokens: &mut Tokenizer) -> ProtocolResult<Command> {
+        let data = tokens.rest()
+            .ok_or_else(|| ProtocolError::MissingArgument("json_data".into()))?
+            .trim()
+            .to_string();
+        // Validate it's valid JSON
+        serde_json::from_str::<serde_json::Value>(&data)
+            .map_err(|e| ProtocolError::InvalidJson(e.to_string()))?;
+        Ok(Command::restore(data))
     }
 }
 

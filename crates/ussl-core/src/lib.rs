@@ -13,4 +13,4 @@ pub mod manager;
 pub use document::{Document, DocumentId, DocumentMeta, COMPACTION_THRESHOLD, COMPACTION_SIZE_THRESHOLD};
 pub use crdt::{Strategy, Value};
 pub use error::{Error, Result};
-pub use manager::DocumentManager;
+pub use manager::{DocumentManager, Backup, DocumentBackup};

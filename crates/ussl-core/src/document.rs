@@ -348,6 +348,24 @@ impl Document {
         Ok(())
     }
 
+    /// Apply a full state snapshot (used for restore)
+    /// This replaces the entire document state with the provided state
+    pub fn apply_state(&self, state: &[u8]) -> Result<()> {
+        if state.is_empty() {
+            return Ok(());
+        }
+
+        let ydoc = self.ydoc.write();
+        let mut txn = ydoc.transact_mut();
+        let decoded = yrs::Update::decode_v1(state)
+            .map_err(|e: yrs::encoding::read::Error| Error::RestoreError(e.to_string()))?;
+        txn.apply_update(decoded);
+        drop(txn);
+        drop(ydoc);
+        self.update_version();
+        Ok(())
+    }
+
     /// Get the number of updates applied to this document
     pub fn update_count(&self) -> u64 {
         self.update_count.load(Ordering::Relaxed)

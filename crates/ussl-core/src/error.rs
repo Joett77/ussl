@@ -31,6 +31,12 @@ pub enum Error {
 
     #[error("Nesting depth exceeds limit: {depth} > {limit}")]
     NestingTooDeep { depth: usize, limit: usize },
+
+    #[error("Invalid strategy: {0}")]
+    InvalidStrategy(String),
+
+    #[error("Failed to restore state: {0}")]
+    RestoreError(String),
 }
 
 /// Result type alias for USSL Core operations
