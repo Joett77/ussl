@@ -81,6 +81,9 @@ pub enum CommandKind {
     Keys {
         pattern: Option<String>,
     },
+
+    /// COMPACT <id> - Force compaction of a document
+    Compact,
 }
 
 impl Command {
@@ -179,6 +182,13 @@ impl Command {
         Command {
             kind: CommandKind::Auth { password },
             document_id: None,
+        }
+    }
+
+    pub fn compact(id: String) -> Self {
+        Command {
+            kind: CommandKind::Compact,
+            document_id: Some(id),
         }
     }
 }

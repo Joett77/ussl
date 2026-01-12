@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Document Compaction** - Prevents unbounded memory growth for CRDT documents
+  - `COMPACT <id>` command to manually trigger compaction
+  - Auto-compaction after 1000 updates or 1MB state size
+  - Preserves document content while discarding operation history
+  - Exposes `update_count()`, `compaction_count()`, `state_size()` metrics
+
 ## [0.3.0] - 2025-01-12
 
 ### Added

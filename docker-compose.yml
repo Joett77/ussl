@@ -9,12 +9,68 @@ services:
     environment:
       - USSL_LOG_LEVEL=info
       - RUST_BACKTRACE=1
+      # Uncomment for authentication:
+      # - USSL_PASSWORD=your-secret-password
+      # Uncomment for persistence:
+      # - USSL_DB=/data/ussl.db
+    volumes:
+      # Uncomment for persistence:
+      # - ussl-data:/data
+      # Uncomment for TLS (mount your certs):
+      # - ./certs:/certs:ro
+    # Uncomment for TLS:
+    # command: ["--bind", "0.0.0.0", "--tls-cert", "/certs/cert.pem", "--tls-key", "/certs/key.pem"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "sh", "-c", "echo PING | nc -w 1 localhost 6380 | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 3
+
+  # Production setup with persistence and auth
+  ussl-prod:
+    build: .
+    ports:
+      - "6380:6380"
+      - "6381:6381"
+    environment:
+      - USSL_LOG_LEVEL=info
+      - USSL_PASSWORD=${USSL_PASSWORD:-changeme}
+      - USSL_DB=/data/ussl.db
+    volumes:
+      - ussl-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo PING | nc -w 1 localhost 6380 | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles:
+      - prod
+
+  # Production with TLS
+  ussl-secure:
+    build: .
+    ports:
+      - "6380:6380"
+      - "6381:6381"
+    environment:
+      - USSL_LOG_LEVEL=info
+      - USSL_PASSWORD=${USSL_PASSWORD:-changeme}
+      - USSL_DB=/data/ussl.db
+      - USSL_TLS_CERT=/certs/cert.pem
+      - USSL_TLS_KEY=/certs/key.pem
+    volumes:
+      - ussl-data:/data
+      - ./certs:/certs:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "sh", "-c", "echo PING | nc -w 1 localhost 6380 | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles:
+      - secure
 
   # Development environment with hot reload
   ussl-dev:
@@ -53,3 +109,4 @@ volumes:
   cargo-cache:
   target-cache:
   postgres-data:
+  ussl-data:

@@ -45,6 +45,7 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
+    netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -52,9 +53,15 @@ WORKDIR /app
 # Copy the binary
 COPY --from=builder /app/target/release/usld /usr/local/bin/usld
 
-# Create non-root user
-RUN useradd -m -u 1000 ussl
+# Create non-root user and data directory
+RUN useradd -m -u 1000 ussl && \
+    mkdir -p /data && \
+    chown ussl:ussl /data
+
 USER ussl
+
+# Volume for persistence
+VOLUME /data
 
 # Expose ports
 EXPOSE 6380 6381

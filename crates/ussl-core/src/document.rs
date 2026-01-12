@@ -3,6 +3,7 @@
 use crate::crdt::{Strategy, Value};
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::RwLock;
 use yrs::{Doc, Text, Transact, ReadTxn, GetString};
@@ -13,6 +14,12 @@ pub const MAX_DOCUMENT_SIZE: usize = 16 * 1024 * 1024;
 
 /// Maximum nesting depth
 pub const MAX_NESTING_DEPTH: usize = 32;
+
+/// Number of updates before auto-compaction is triggered
+pub const COMPACTION_THRESHOLD: u64 = 1000;
+
+/// Size threshold in bytes for compaction (1MB)
+pub const COMPACTION_SIZE_THRESHOLD: usize = 1024 * 1024;
 
 /// Document identifier - UTF-8 string, max 512 bytes
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -85,9 +92,13 @@ impl DocumentMeta {
 pub struct Document {
     meta: RwLock<DocumentMeta>,
     /// Y.js document for CRDT operations
-    ydoc: Doc,
+    ydoc: RwLock<Doc>,
     /// LWW fallback for simple key-value
     lww_data: RwLock<Value>,
+    /// Number of updates applied (for compaction heuristics)
+    update_count: AtomicU64,
+    /// Number of compactions performed
+    compaction_count: AtomicU64,
 }
 
 impl Document {
@@ -95,8 +106,10 @@ impl Document {
     pub fn new(id: DocumentId, strategy: Strategy) -> Self {
         Self {
             meta: RwLock::new(DocumentMeta::new(id, strategy)),
-            ydoc: Doc::new(),
+            ydoc: RwLock::new(Doc::new()),
             lww_data: RwLock::new(Value::Object(std::collections::HashMap::new())),
+            update_count: AtomicU64::new(0),
+            compaction_count: AtomicU64::new(0),
         }
     }
 
@@ -135,8 +148,9 @@ impl Document {
                 }
             }
             Strategy::CrdtText => {
-                let text = self.ydoc.get_or_insert_text("content");
-                let txn = self.ydoc.transact();
+                let ydoc = self.ydoc.read();
+                let text = ydoc.get_or_insert_text("content");
+                let txn = ydoc.transact();
                 Ok(Value::String(text.get_string(&txn)))
             }
             Strategy::CrdtCounter => {
@@ -163,11 +177,15 @@ impl Document {
             }
             Strategy::CrdtText => {
                 if let Value::String(text_value) = value {
-                    let ytext = self.ydoc.get_or_insert_text("content");
-                    let mut txn = self.ydoc.transact_mut();
+                    let ydoc = self.ydoc.write();
+                    let ytext = ydoc.get_or_insert_text("content");
+                    let mut txn = ydoc.transact_mut();
                     let current_len = ytext.get_string(&txn).len() as u32;
                     ytext.remove_range(&mut txn, 0, current_len);
                     ytext.insert(&mut txn, 0, &text_value);
+                    drop(txn);
+                    drop(ydoc);
+                    self.increment_update_count();
                     self.update_version();
                     Ok(())
                 } else {
@@ -242,18 +260,121 @@ impl Document {
 
     /// Get the Y.js document state as bytes (for sync)
     pub fn encode_state(&self) -> Vec<u8> {
-        let txn = self.ydoc.transact();
+        let ydoc = self.ydoc.read();
+        let txn = ydoc.transact();
         txn.encode_state_as_update_v1(&yrs::StateVector::default())
     }
 
     /// Apply a Y.js update from another peer
     pub fn apply_update(&self, update: &[u8]) -> Result<()> {
-        let mut txn = self.ydoc.transact_mut();
+        let ydoc = self.ydoc.write();
+        let mut txn = ydoc.transact_mut();
         let decoded = yrs::Update::decode_v1(update)
             .map_err(|e: yrs::encoding::read::Error| Error::Crdt(e.to_string()))?;
         txn.apply_update(decoded);
+        drop(txn);
+        drop(ydoc);
+        self.increment_update_count();
         self.update_version();
         Ok(())
+    }
+
+    /// Get the number of updates applied to this document
+    pub fn update_count(&self) -> u64 {
+        self.update_count.load(Ordering::Relaxed)
+    }
+
+    /// Get the number of compactions performed on this document
+    pub fn compaction_count(&self) -> u64 {
+        self.compaction_count.load(Ordering::Relaxed)
+    }
+
+    /// Get the current encoded state size in bytes
+    pub fn state_size(&self) -> usize {
+        self.encode_state().len()
+    }
+
+    /// Check if the document should be compacted based on heuristics
+    pub fn should_compact(&self) -> bool {
+        let updates = self.update_count.load(Ordering::Relaxed);
+        if updates >= COMPACTION_THRESHOLD {
+            return true;
+        }
+
+        // Only check size if we have some updates (avoid checking on every read)
+        if updates > 100 {
+            let size = self.state_size();
+            if size >= COMPACTION_SIZE_THRESHOLD {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Compact the document by snapshotting current state and resetting history
+    ///
+    /// This reduces memory usage by discarding the CRDT operation history
+    /// and keeping only the final state. After compaction, the document
+    /// will have a fresh Yrs doc with the same content but no history.
+    ///
+    /// Returns the number of bytes saved (old size - new size), or 0 if
+    /// compaction wasn't beneficial.
+    pub fn compact(&self) -> Result<usize> {
+        // Get current state
+        let old_state = self.encode_state();
+        let old_size = old_state.len();
+
+        // For CrdtText, we need to preserve the text content
+        let strategy = self.strategy();
+        let text_content = if strategy == Strategy::CrdtText {
+            let ydoc = self.ydoc.read();
+            let text = ydoc.get_or_insert_text("content");
+            let txn = ydoc.transact();
+            Some(text.get_string(&txn))
+        } else {
+            None
+        };
+
+        // Create a fresh Doc and apply the snapshot
+        let new_doc = Doc::new();
+
+        if let Some(content) = text_content {
+            // For text documents, just set the content directly
+            let text = new_doc.get_or_insert_text("content");
+            let mut txn = new_doc.transact_mut();
+            text.insert(&mut txn, 0, &content);
+        } else {
+            // For other types, apply the state update
+            let mut txn = new_doc.transact_mut();
+            let decoded = yrs::Update::decode_v1(&old_state)
+                .map_err(|e: yrs::encoding::read::Error| Error::Crdt(e.to_string()))?;
+            txn.apply_update(decoded);
+        }
+
+        // Replace the old doc with the new one
+        {
+            let mut ydoc = self.ydoc.write();
+            *ydoc = new_doc;
+        }
+
+        // Reset update counter and increment compaction counter
+        self.update_count.store(0, Ordering::Relaxed);
+        self.compaction_count.fetch_add(1, Ordering::Relaxed);
+
+        // Calculate bytes saved
+        let new_size = self.encode_state().len();
+        let saved = if old_size > new_size {
+            old_size - new_size
+        } else {
+            0
+        };
+
+        Ok(saved)
+    }
+
+    fn increment_update_count(&self) {
+        self.update_count.fetch_add(1, Ordering::Relaxed);
     }
 
     fn update_version(&self) {
@@ -321,5 +442,63 @@ mod tests {
         assert_eq!(doc.increment("count", 5).unwrap(), 5);
         assert_eq!(doc.increment("count", 3).unwrap(), 8);
         assert_eq!(doc.increment("count", -2).unwrap(), 6);
+    }
+
+    #[test]
+    fn test_document_update_count() {
+        let id = DocumentId::new("test:4").unwrap();
+        let doc = Document::new(id, Strategy::CrdtText);
+
+        assert_eq!(doc.update_count(), 0);
+
+        // CrdtText updates should increment update_count
+        doc.set("content", Value::String("Hello".into())).unwrap();
+        assert_eq!(doc.update_count(), 1);
+
+        doc.set("content", Value::String("Hello World".into())).unwrap();
+        assert_eq!(doc.update_count(), 2);
+    }
+
+    #[test]
+    fn test_document_compaction() {
+        let id = DocumentId::new("test:5").unwrap();
+        let doc = Document::new(id, Strategy::CrdtText);
+
+        // Add some content
+        doc.set("content", Value::String("Hello World".into())).unwrap();
+
+        // Get initial state
+        let initial_size = doc.state_size();
+        assert!(initial_size > 0);
+
+        // Compact
+        let _saved = doc.compact().unwrap();
+
+        // Verify content is preserved
+        let value = doc.get(None).unwrap();
+        assert_eq!(value, Value::String("Hello World".into()));
+
+        // Update count should be reset
+        assert_eq!(doc.update_count(), 0);
+
+        // Compaction count should be incremented
+        assert_eq!(doc.compaction_count(), 1);
+    }
+
+    #[test]
+    fn test_should_compact_threshold() {
+        let id = DocumentId::new("test:6").unwrap();
+        let doc = Document::new(id, Strategy::Lww);
+
+        // Initially should not need compaction
+        assert!(!doc.should_compact());
+
+        // We can't easily simulate 1000 updates in this test,
+        // but we can verify the logic doesn't panic
+        for i in 0..10 {
+            doc.set("key", Value::Number(crate::crdt::Number::Integer(i))).unwrap();
+        }
+        // Still shouldn't need compaction after 10 updates
+        assert!(!doc.should_compact());
     }
 }

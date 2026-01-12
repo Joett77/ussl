@@ -139,6 +139,7 @@ impl ConnectionHandler {
             CommandKind::Quit => unreachable!(), // Handled above
             CommandKind::Info => self.handle_info(),
             CommandKind::Keys { pattern } => self.handle_keys(pattern),
+            CommandKind::Compact => self.handle_compact(cmd.document_id),
         }
     }
 
@@ -220,6 +221,9 @@ impl ConnectionHandler {
 
         match doc.set(&path, value) {
             Ok(_) => {
+                // Check if auto-compaction is needed
+                self.maybe_auto_compact(&id, &doc);
+
                 // Persist to storage if available
                 self.persist_document(&id, &doc);
 
@@ -298,6 +302,9 @@ impl ConnectionHandler {
 
         match doc.push(&path, value) {
             Ok(_) => {
+                // Check if auto-compaction is needed
+                self.maybe_auto_compact(&id, &doc);
+
                 self.persist_document(&id, &doc);
                 Response::ok()
             }
@@ -320,6 +327,9 @@ impl ConnectionHandler {
 
         match doc.increment(&path, delta) {
             Ok(new_value) => {
+                // Check if auto-compaction is needed
+                self.maybe_auto_compact(&id, &doc);
+
                 self.persist_document(&id, &doc);
                 Response::integer(new_value)
             }
@@ -376,6 +386,56 @@ impl ConnectionHandler {
             .map(|meta| Response::bulk(meta.id.as_str().as_bytes().to_vec()))
             .collect();
         Response::array(keys)
+    }
+
+    fn handle_compact(&self, doc_id: Option<String>) -> Response {
+        let id_str = match doc_id {
+            Some(id) => id,
+            None => return Response::error("MISSING_ARG", "Document ID required"),
+        };
+
+        let id = match DocumentId::new(&id_str) {
+            Ok(id) => id,
+            Err(e) => return Response::error("INVALID_ID", e.to_string()),
+        };
+
+        match self.manager.get(&id) {
+            Ok(doc) => {
+                match doc.compact() {
+                    Ok(bytes_saved) => {
+                        info!(
+                            doc_id = %id,
+                            bytes_saved = bytes_saved,
+                            compaction_count = doc.compaction_count(),
+                            "Document compacted"
+                        );
+                        Response::integer(bytes_saved as i64)
+                    }
+                    Err(e) => Response::error("COMPACT_ERROR", e.to_string()),
+                }
+            }
+            Err(_) => Response::not_found(&id_str),
+        }
+    }
+
+    /// Check if a document should be compacted and do so automatically
+    fn maybe_auto_compact(&self, id: &DocumentId, doc: &ussl_core::Document) {
+        if doc.should_compact() {
+            debug!(doc_id = %id, updates = doc.update_count(), "Auto-compacting document");
+            match doc.compact() {
+                Ok(bytes_saved) => {
+                    info!(
+                        doc_id = %id,
+                        bytes_saved = bytes_saved,
+                        compaction_count = doc.compaction_count(),
+                        "Auto-compaction completed"
+                    );
+                }
+                Err(e) => {
+                    warn!(doc_id = %id, error = %e, "Auto-compaction failed");
+                }
+            }
+        }
     }
 
     /// Persist a document to storage (if available)

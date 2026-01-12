@@ -83,6 +83,7 @@ impl Parser {
             "QUIT" => Ok(Command::quit()),
             "INFO" => Ok(Command::info()),
             "KEYS" => Self::parse_keys(&mut tokens),
+            "COMPACT" => Self::parse_compact(&mut tokens),
             _ => Err(ProtocolError::InvalidCommand(format!("Unknown command: {}", cmd))),
         }
     }
@@ -262,6 +263,12 @@ impl Parser {
     fn parse_keys(tokens: &mut Tokenizer) -> ProtocolResult<Command> {
         let pattern = tokens.next().map(|s| s.to_string());
         Ok(Command::keys(pattern))
+    }
+
+    fn parse_compact(tokens: &mut Tokenizer) -> ProtocolResult<Command> {
+        let id = tokens.next()
+            .ok_or_else(|| ProtocolError::MissingArgument("document_id".into()))?;
+        Ok(Command::compact(id.to_string()))
     }
 }
 

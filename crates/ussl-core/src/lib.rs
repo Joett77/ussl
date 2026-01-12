@@ -10,7 +10,7 @@ pub mod crdt;
 pub mod error;
 pub mod manager;
 
-pub use document::{Document, DocumentId, DocumentMeta};
+pub use document::{Document, DocumentId, DocumentMeta, COMPACTION_THRESHOLD, COMPACTION_SIZE_THRESHOLD};
 pub use crdt::{Strategy, Value};
 pub use error::{Error, Result};
 pub use manager::DocumentManager;
