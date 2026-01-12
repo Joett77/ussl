@@ -6,6 +6,7 @@ use tracing::{debug, error, info, warn};
 use ussl_core::{DocumentId, DocumentManager, Strategy, Value};
 use ussl_protocol::{Command, CommandKind, Parser, Response};
 use ussl_storage::Storage;
+use crate::rate_limit::{RateLimiter, RateLimitConfig};
 
 /// Handles a single client connection
 pub struct ConnectionHandler {
@@ -25,6 +26,8 @@ pub struct ConnectionHandler {
     password: Option<String>,
     /// Optional persistent storage
     storage: Option<Arc<dyn Storage>>,
+    /// Optional rate limiter
+    rate_limiter: Option<RateLimiter>,
 }
 
 impl ConnectionHandler {
@@ -38,6 +41,7 @@ impl ConnectionHandler {
             authenticated: true, // No auth required by default
             password: None,
             storage: None,
+            rate_limiter: None,
         }
     }
 
@@ -52,12 +56,19 @@ impl ConnectionHandler {
             authenticated: false,
             password: Some(password),
             storage: None,
+            rate_limiter: None,
         }
     }
 
     /// Set the storage backend for persistence
     pub fn with_storage(mut self, storage: Arc<dyn Storage>) -> Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// Set the rate limiter for this connection
+    pub fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limiter = Some(RateLimiter::new(config));
         self
     }
 
@@ -73,6 +84,20 @@ impl ConnectionHandler {
         loop {
             match self.parser.parse() {
                 Ok(Some(cmd)) => {
+                    // Check rate limit (skip for PING/QUIT)
+                    if !matches!(cmd.kind, CommandKind::Ping | CommandKind::Quit) {
+                        if let Some(ref limiter) = self.rate_limiter {
+                            if !limiter.try_acquire() {
+                                warn!(client = %self.client_id, "Rate limited");
+                                responses.push(Response::error(
+                                    "RATE_LIMITED",
+                                    "Too many requests. Please slow down.",
+                                ));
+                                continue;
+                            }
+                        }
+                    }
+
                     let response = self.handle_command(cmd);
                     responses.push(response);
                 }
@@ -140,6 +165,8 @@ impl ConnectionHandler {
             CommandKind::Info => self.handle_info(),
             CommandKind::Keys { pattern } => self.handle_keys(pattern),
             CommandKind::Compact => self.handle_compact(cmd.document_id),
+            CommandKind::Expire { ttl_ms } => self.handle_expire(cmd.document_id, ttl_ms),
+            CommandKind::Ttl => self.handle_ttl(cmd.document_id),
         }
     }
 
@@ -413,6 +440,61 @@ impl ConnectionHandler {
                     }
                     Err(e) => Response::error("COMPACT_ERROR", e.to_string()),
                 }
+            }
+            Err(_) => Response::not_found(&id_str),
+        }
+    }
+
+    fn handle_expire(&self, doc_id: Option<String>, ttl_ms: u64) -> Response {
+        let id_str = match doc_id {
+            Some(id) => id,
+            None => return Response::error("MISSING_ARG", "Document ID required"),
+        };
+
+        let id = match DocumentId::new(&id_str) {
+            Ok(id) => id,
+            Err(e) => return Response::error("INVALID_ID", e.to_string()),
+        };
+
+        // TTL of 0 means remove TTL
+        let ttl = if ttl_ms == 0 { None } else { Some(ttl_ms) };
+
+        match self.manager.set_expire(&id, ttl) {
+            Ok(_) => {
+                if ttl.is_some() {
+                    info!(doc_id = %id, ttl_ms = ttl_ms, "TTL set");
+                } else {
+                    info!(doc_id = %id, "TTL removed");
+                }
+                Response::ok()
+            }
+            Err(e) => Response::error("EXPIRE_ERROR", e.to_string()),
+        }
+    }
+
+    fn handle_ttl(&self, doc_id: Option<String>) -> Response {
+        let id_str = match doc_id {
+            Some(id) => id,
+            None => return Response::error("MISSING_ARG", "Document ID required"),
+        };
+
+        let id = match DocumentId::new(&id_str) {
+            Ok(id) => id,
+            Err(e) => return Response::error("INVALID_ID", e.to_string()),
+        };
+
+        match self.manager.ttl(&id) {
+            Ok(Some(remaining)) => {
+                if remaining < 0 {
+                    // Already expired
+                    Response::integer(-2)
+                } else {
+                    Response::integer(remaining)
+                }
+            }
+            Ok(None) => {
+                // No TTL set
+                Response::integer(-1)
             }
             Err(_) => Response::not_found(&id_str),
         }

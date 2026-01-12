@@ -11,6 +11,7 @@ pub mod websocket;
 pub mod handler;
 #[cfg(feature = "tls")]
 pub mod tls;
+pub mod rate_limit;
 
 pub use tcp::TcpServer;
 #[cfg(feature = "websocket")]
@@ -18,3 +19,4 @@ pub use websocket::WebSocketServer;
 pub use handler::ConnectionHandler;
 #[cfg(feature = "tls")]
 pub use tls::{TlsConfig, TlsError};
+pub use rate_limit::{RateLimiter, RateLimitConfig};

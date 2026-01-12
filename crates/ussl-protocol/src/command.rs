@@ -84,6 +84,14 @@ pub enum CommandKind {
 
     /// COMPACT <id> - Force compaction of a document
     Compact,
+
+    /// EXPIRE <id> <ttl_ms> - Set TTL for a document (0 to remove TTL)
+    Expire {
+        ttl_ms: u64,
+    },
+
+    /// TTL <id> - Get remaining TTL for a document
+    Ttl,
 }
 
 impl Command {
@@ -188,6 +196,20 @@ impl Command {
     pub fn compact(id: String) -> Self {
         Command {
             kind: CommandKind::Compact,
+            document_id: Some(id),
+        }
+    }
+
+    pub fn expire(id: String, ttl_ms: u64) -> Self {
+        Command {
+            kind: CommandKind::Expire { ttl_ms },
+            document_id: Some(id),
+        }
+    }
+
+    pub fn ttl(id: String) -> Self {
+        Command {
+            kind: CommandKind::Ttl,
             document_id: Some(id),
         }
     }

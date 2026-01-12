@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Preserves document content while discarding operation history
   - Exposes `update_count()`, `compaction_count()`, `state_size()` metrics
 
+- **TTL/Expiration Support** - Documents can automatically expire
+  - `CREATE <id> TTL <ms>` - Create document with time-to-live
+  - `EXPIRE <id> <ms>` - Set/update TTL on existing document (0 to remove)
+  - `TTL <id>` - Get remaining TTL in milliseconds (-1 = no TTL, -2 = expired)
+  - Background GC runs every 60 seconds to clean up expired documents
+
+- **Rate Limiting** - Protect server from overload with per-client limits
+  - Token bucket algorithm with configurable rate and burst
+  - `--rate-limit <N>` - Max requests per second per client
+  - `--rate-burst <N>` - Burst capacity (default: 2x rate limit)
+  - Environment variables: `USSL_RATE_LIMIT`, `USSL_RATE_BURST`
+  - Returns `-ERR RATE_LIMITED` when limit exceeded
+  - PING/QUIT commands are exempt from rate limiting
+
 ## [0.3.0] - 2025-01-12
 
 ### Added

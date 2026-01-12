@@ -35,7 +35,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use ussl_core::DocumentManager;
 use ussl_storage::SqliteStorage;
-use ussl_transport::{TcpServer, TlsConfig, WebSocketServer};
+use ussl_transport::{RateLimitConfig, TcpServer, TlsConfig, WebSocketServer};
 
 /// USSL Daemon - Universal State Synchronization Layer
 #[derive(Parser, Debug)]
@@ -85,6 +85,14 @@ struct Args {
     /// Path to TLS private key file (PEM format)
     #[arg(long, env = "USSL_TLS_KEY", requires = "tls_cert")]
     tls_key: Option<PathBuf>,
+
+    /// Rate limit: max requests per second per client (0 = disabled)
+    #[arg(long, env = "USSL_RATE_LIMIT", default_value = "0")]
+    rate_limit: u32,
+
+    /// Rate limit burst size (default: 2x rate limit)
+    #[arg(long, env = "USSL_RATE_BURST")]
+    rate_burst: Option<u32>,
 }
 
 #[tokio::main]
@@ -151,11 +159,21 @@ async fn main() -> Result<()> {
         _ => None,
     };
 
+    // Initialize rate limiting if configured
+    let rate_limit_config = if args.rate_limit > 0 {
+        let burst = args.rate_burst.unwrap_or(args.rate_limit * 2);
+        info!(rate = args.rate_limit, burst = burst, "Rate limiting enabled");
+        Some(RateLimitConfig::new(args.rate_limit, burst))
+    } else {
+        None
+    };
+
     info!(
         tcp_port = args.tcp_port,
         ws_port = args.ws_port,
         bind = %args.bind,
         tls = tls_config.is_some(),
+        rate_limit = args.rate_limit,
         "Starting USSL daemon"
     );
 
@@ -179,6 +197,9 @@ async fn main() -> Result<()> {
         if let Some(ref tls) = tls_config {
             tcp_server = tcp_server.with_tls(tls.clone());
         }
+        if let Some(ref rl) = rate_limit_config {
+            tcp_server = tcp_server.with_rate_limit(rl.clone());
+        }
         handles.push(tokio::spawn(async move {
             if let Err(e) = tcp_server.run().await {
                 tracing::error!(error = %e, "TCP server error");
@@ -198,6 +219,9 @@ async fn main() -> Result<()> {
         if let Some(ref tls) = tls_config {
             ws_server = ws_server.with_tls(tls.clone());
         }
+        if let Some(ref rl) = rate_limit_config {
+            ws_server = ws_server.with_rate_limit(rl.clone());
+        }
         handles.push(tokio::spawn(async move {
             if let Err(e) = ws_server.run().await {
                 tracing::error!(error = %e, "WebSocket server error");
@@ -208,6 +232,19 @@ async fn main() -> Result<()> {
     if handles.is_empty() {
         anyhow::bail!("At least one transport must be enabled");
     }
+
+    // Start background GC task
+    let gc_manager = manager.clone();
+    handles.push(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let removed = gc_manager.gc();
+            if removed > 0 {
+                tracing::info!(removed = removed, "GC: removed expired documents");
+            }
+        }
+    }));
 
     // Wait for shutdown signal
     tokio::signal::ctrl_c().await?;

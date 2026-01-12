@@ -14,6 +14,7 @@ use ussl_protocol::Response;
 use ussl_storage::Storage;
 
 use crate::handler::ConnectionHandler;
+use crate::rate_limit::RateLimitConfig;
 
 #[cfg(feature = "tls")]
 use crate::tls::TlsConfig;
@@ -25,6 +26,7 @@ pub struct WebSocketServer {
     client_counter: AtomicU64,
     password: Option<String>,
     storage: Option<Arc<dyn Storage>>,
+    rate_limit: Option<RateLimitConfig>,
     #[cfg(feature = "tls")]
     tls_config: Option<TlsConfig>,
 }
@@ -37,6 +39,7 @@ impl WebSocketServer {
             client_counter: AtomicU64::new(0),
             password: None,
             storage: None,
+            rate_limit: None,
             #[cfg(feature = "tls")]
             tls_config: None,
         }
@@ -50,6 +53,7 @@ impl WebSocketServer {
             client_counter: AtomicU64::new(0),
             password: Some(password),
             storage: None,
+            rate_limit: None,
             #[cfg(feature = "tls")]
             tls_config: None,
         }
@@ -58,6 +62,12 @@ impl WebSocketServer {
     /// Set the storage backend for persistence
     pub fn with_storage(mut self, storage: Arc<dyn Storage>) -> Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// Set rate limiting for connections
+    pub fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limit = Some(config);
         self
     }
 
@@ -97,6 +107,7 @@ impl WebSocketServer {
                     let manager = self.manager.clone();
                     let password = self.password.clone();
                     let storage = self.storage.clone();
+                    let rate_limit = self.rate_limit.clone();
 
                     #[cfg(feature = "tls")]
                     let tls_config = self.tls_config.clone();
@@ -110,7 +121,7 @@ impl WebSocketServer {
                                     Ok(tls_stream) => {
                                         match accept_async(tls_stream).await {
                                             Ok(ws_stream) => {
-                                                if let Err(e) = handle_ws_connection(ws_stream, client_id.clone(), manager, password, storage).await {
+                                                if let Err(e) = handle_ws_connection(ws_stream, client_id.clone(), manager, password, storage, rate_limit).await {
                                                     error!(client = %client_id, error = %e, "WSS connection error");
                                                 }
                                             }
@@ -126,7 +137,7 @@ impl WebSocketServer {
                             } else {
                                 match accept_async(stream).await {
                                     Ok(ws_stream) => {
-                                        if let Err(e) = handle_ws_connection(ws_stream, client_id.clone(), manager, password, storage).await {
+                                        if let Err(e) = handle_ws_connection(ws_stream, client_id.clone(), manager, password, storage, rate_limit).await {
                                             error!(client = %client_id, error = %e, "WebSocket connection error");
                                         }
                                     }
@@ -141,7 +152,7 @@ impl WebSocketServer {
                         {
                             match accept_async(stream).await {
                                 Ok(ws_stream) => {
-                                    if let Err(e) = handle_ws_connection(ws_stream, client_id.clone(), manager, password, storage).await {
+                                    if let Err(e) = handle_ws_connection(ws_stream, client_id.clone(), manager, password, storage, rate_limit).await {
                                         error!(client = %client_id, error = %e, "WebSocket connection error");
                                     }
                                 }
@@ -167,6 +178,7 @@ async fn handle_ws_connection<S>(
     manager: Arc<DocumentManager>,
     password: Option<String>,
     storage: Option<Arc<dyn Storage>>,
+    rate_limit: Option<RateLimitConfig>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -179,8 +191,12 @@ where
         Some(pwd) => ConnectionHandler::with_auth(client_id.clone(), manager, pwd),
         None => ConnectionHandler::new(client_id.clone(), manager),
     };
-    let mut handler = match storage {
+    let handler = match storage {
         Some(s) => handler.with_storage(s),
+        None => handler,
+    };
+    let mut handler = match rate_limit {
+        Some(config) => handler.with_rate_limit(config),
         None => handler,
     };
     let mut update_rx = handler.subscribe_updates();

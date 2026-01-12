@@ -84,6 +84,8 @@ impl Parser {
             "INFO" => Ok(Command::info()),
             "KEYS" => Self::parse_keys(&mut tokens),
             "COMPACT" => Self::parse_compact(&mut tokens),
+            "EXPIRE" => Self::parse_expire(&mut tokens),
+            "TTL" => Self::parse_ttl(&mut tokens),
             _ => Err(ProtocolError::InvalidCommand(format!("Unknown command: {}", cmd))),
         }
     }
@@ -269,6 +271,22 @@ impl Parser {
         let id = tokens.next()
             .ok_or_else(|| ProtocolError::MissingArgument("document_id".into()))?;
         Ok(Command::compact(id.to_string()))
+    }
+
+    fn parse_expire(tokens: &mut Tokenizer) -> ProtocolResult<Command> {
+        let id = tokens.next()
+            .ok_or_else(|| ProtocolError::MissingArgument("document_id".into()))?;
+        let ttl_str = tokens.next()
+            .ok_or_else(|| ProtocolError::MissingArgument("ttl_ms".into()))?;
+        let ttl_ms: u64 = ttl_str.parse()
+            .map_err(|_| ProtocolError::InvalidArgument(format!("Invalid TTL: {}", ttl_str)))?;
+        Ok(Command::expire(id.to_string(), ttl_ms))
+    }
+
+    fn parse_ttl(tokens: &mut Tokenizer) -> ProtocolResult<Command> {
+        let id = tokens.next()
+            .ok_or_else(|| ProtocolError::MissingArgument("document_id".into()))?;
+        Ok(Command::ttl(id.to_string()))
     }
 }
 

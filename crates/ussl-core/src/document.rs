@@ -86,6 +86,48 @@ impl DocumentMeta {
             ttl: None,
         }
     }
+
+    pub fn with_ttl(id: DocumentId, strategy: Strategy, ttl_ms: u64) -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        Self {
+            id,
+            strategy,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            ttl: Some(ttl_ms),
+        }
+    }
+
+    /// Check if the document has expired based on TTL
+    pub fn is_expired(&self) -> bool {
+        if let Some(ttl_ms) = self.ttl {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            // Expire based on created_at + ttl
+            now > self.created_at + ttl_ms
+        } else {
+            false
+        }
+    }
+
+    /// Get time remaining before expiration (in ms), or None if no TTL
+    pub fn ttl_remaining(&self) -> Option<i64> {
+        self.ttl.map(|ttl_ms| {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            let expires_at = self.created_at + ttl_ms;
+            expires_at as i64 - now as i64
+        })
+    }
 }
 
 /// A synchronized document with CRDT support
@@ -113,6 +155,17 @@ impl Document {
         }
     }
 
+    /// Create a new document with TTL (time-to-live in milliseconds)
+    pub fn with_ttl(id: DocumentId, strategy: Strategy, ttl_ms: u64) -> Self {
+        Self {
+            meta: RwLock::new(DocumentMeta::with_ttl(id, strategy, ttl_ms)),
+            ydoc: RwLock::new(Doc::new()),
+            lww_data: RwLock::new(Value::Object(std::collections::HashMap::new())),
+            update_count: AtomicU64::new(0),
+            compaction_count: AtomicU64::new(0),
+        }
+    }
+
     /// Get the document ID
     pub fn id(&self) -> DocumentId {
         self.meta.read().id.clone()
@@ -126,6 +179,22 @@ impl Document {
     /// Get document metadata
     pub fn meta(&self) -> DocumentMeta {
         self.meta.read().clone()
+    }
+
+    /// Check if the document has expired
+    pub fn is_expired(&self) -> bool {
+        self.meta.read().is_expired()
+    }
+
+    /// Get TTL remaining in milliseconds (None if no TTL set)
+    pub fn ttl_remaining(&self) -> Option<i64> {
+        self.meta.read().ttl_remaining()
+    }
+
+    /// Set or update the TTL for this document (in milliseconds)
+    pub fn set_ttl(&self, ttl_ms: Option<u64>) {
+        let mut meta = self.meta.write();
+        meta.ttl = ttl_ms;
     }
 
     /// Get the current version

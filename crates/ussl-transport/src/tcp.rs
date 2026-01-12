@@ -12,6 +12,7 @@ use ussl_protocol::Response;
 use ussl_storage::Storage;
 
 use crate::handler::ConnectionHandler;
+use crate::rate_limit::RateLimitConfig;
 
 #[cfg(feature = "tls")]
 use crate::tls::TlsConfig;
@@ -23,6 +24,7 @@ pub struct TcpServer {
     client_counter: AtomicU64,
     password: Option<String>,
     storage: Option<Arc<dyn Storage>>,
+    rate_limit: Option<RateLimitConfig>,
     #[cfg(feature = "tls")]
     tls_config: Option<TlsConfig>,
 }
@@ -35,6 +37,7 @@ impl TcpServer {
             client_counter: AtomicU64::new(0),
             password: None,
             storage: None,
+            rate_limit: None,
             #[cfg(feature = "tls")]
             tls_config: None,
         }
@@ -48,6 +51,7 @@ impl TcpServer {
             client_counter: AtomicU64::new(0),
             password: Some(password),
             storage: None,
+            rate_limit: None,
             #[cfg(feature = "tls")]
             tls_config: None,
         }
@@ -56,6 +60,12 @@ impl TcpServer {
     /// Set the storage backend for persistence
     pub fn with_storage(mut self, storage: Arc<dyn Storage>) -> Self {
         self.storage = Some(storage);
+        self
+    }
+
+    /// Set rate limiting for connections
+    pub fn with_rate_limit(mut self, config: RateLimitConfig) -> Self {
+        self.rate_limit = Some(config);
         self
     }
 
@@ -94,6 +104,7 @@ impl TcpServer {
                     let manager = self.manager.clone();
                     let password = self.password.clone();
                     let storage = self.storage.clone();
+                    let rate_limit = self.rate_limit.clone();
 
                     #[cfg(feature = "tls")]
                     let tls_config = self.tls_config.clone();
@@ -104,7 +115,7 @@ impl TcpServer {
                             if let Some(tls) = tls_config {
                                 match tls.acceptor().accept(stream).await {
                                     Ok(tls_stream) => {
-                                        if let Err(e) = handle_connection(tls_stream, client_id.clone(), manager, password, storage).await {
+                                        if let Err(e) = handle_connection(tls_stream, client_id.clone(), manager, password, storage, rate_limit).await {
                                             error!(client = %client_id, error = %e, "TLS connection error");
                                         }
                                     }
@@ -113,7 +124,7 @@ impl TcpServer {
                                     }
                                 }
                             } else {
-                                if let Err(e) = handle_connection(stream, client_id.clone(), manager, password, storage).await {
+                                if let Err(e) = handle_connection(stream, client_id.clone(), manager, password, storage, rate_limit).await {
                                     error!(client = %client_id, error = %e, "Connection error");
                                 }
                             }
@@ -121,7 +132,7 @@ impl TcpServer {
 
                         #[cfg(not(feature = "tls"))]
                         {
-                            if let Err(e) = handle_connection(stream, client_id.clone(), manager, password, storage).await {
+                            if let Err(e) = handle_connection(stream, client_id.clone(), manager, password, storage, rate_limit).await {
                                 error!(client = %client_id, error = %e, "Connection error");
                             }
                         }
@@ -142,6 +153,7 @@ async fn handle_connection<S>(
     manager: Arc<DocumentManager>,
     password: Option<String>,
     storage: Option<Arc<dyn Storage>>,
+    rate_limit: Option<RateLimitConfig>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     S: AsyncRead + AsyncWrite + Unpin,
@@ -154,8 +166,12 @@ where
         Some(pwd) => ConnectionHandler::with_auth(client_id.clone(), manager, pwd),
         None => ConnectionHandler::new(client_id.clone(), manager),
     };
-    let mut handler = match storage {
+    let handler = match storage {
         Some(s) => handler.with_storage(s),
+        None => handler,
+    };
+    let mut handler = match rate_limit {
+        Some(config) => handler.with_rate_limit(config),
         None => handler,
     };
     let mut buf = vec![0u8; 4096];
@@ -235,7 +251,7 @@ mod tests {
         let manager_clone = manager.clone();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            handle_connection(stream, "test".into(), manager_clone, None, None).await.unwrap();
+            handle_connection(stream, "test".into(), manager_clone, None, None, None).await.unwrap();
         });
 
         // Connect client

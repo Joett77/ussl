@@ -59,7 +59,10 @@ impl DocumentManager {
             return Err(Error::DocumentExists(key));
         }
 
-        let doc = Arc::new(Document::new(id, strategy));
+        let doc = Arc::new(match ttl {
+            Some(ttl_ms) => Document::with_ttl(id, strategy, ttl_ms),
+            None => Document::new(id, strategy),
+        });
         self.documents.insert(key, doc.clone());
 
         Ok(doc)
@@ -152,6 +155,48 @@ impl DocumentManager {
         }
     }
 
+    /// Set TTL for an existing document
+    pub fn set_expire(&self, id: &DocumentId, ttl_ms: Option<u64>) -> Result<()> {
+        let doc = self.get(id)?;
+        doc.set_ttl(ttl_ms);
+        Ok(())
+    }
+
+    /// Get TTL remaining for a document (in ms)
+    pub fn ttl(&self, id: &DocumentId) -> Result<Option<i64>> {
+        let doc = self.get(id)?;
+        Ok(doc.ttl_remaining())
+    }
+
+    /// Run garbage collection - removes expired documents
+    /// Returns the number of documents removed
+    pub fn gc(&self) -> usize {
+        let mut to_remove = Vec::new();
+
+        for entry in self.documents.iter() {
+            if entry.value().is_expired() {
+                to_remove.push(entry.key().clone());
+            }
+        }
+
+        let count = to_remove.len();
+        for key in to_remove {
+            self.documents.remove(&key);
+            // Also clean up any presence data
+            self.presence.remove(&key);
+        }
+
+        count
+    }
+
+    /// Get count of expired documents (without removing them)
+    pub fn expired_count(&self) -> usize {
+        self.documents
+            .iter()
+            .filter(|entry| entry.value().is_expired())
+            .count()
+    }
+
     /// Get statistics
     pub fn stats(&self) -> ManagerStats {
         ManagerStats {
@@ -238,5 +283,72 @@ mod tests {
 
         let all = manager.list(None);
         assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_create_with_ttl() {
+        let manager = DocumentManager::new();
+        let id = DocumentId::new("ttl:1").unwrap();
+
+        // Create with 1 hour TTL
+        let doc = manager.create(id.clone(), Strategy::Lww, Some(3600_000)).unwrap();
+
+        // Document should not be expired yet
+        assert!(!doc.is_expired());
+
+        // TTL should be approximately 1 hour (in ms)
+        let ttl = doc.ttl_remaining().unwrap();
+        assert!(ttl > 3599_000 && ttl <= 3600_000);
+    }
+
+    #[test]
+    fn test_set_expire() {
+        let manager = DocumentManager::new();
+        let id = DocumentId::new("expire:1").unwrap();
+
+        // Create without TTL
+        manager.create(id.clone(), Strategy::Lww, None).unwrap();
+
+        // Initially no TTL
+        assert!(manager.ttl(&id).unwrap().is_none());
+
+        // Set TTL
+        manager.set_expire(&id, Some(5000)).unwrap();
+
+        // Now has TTL
+        let ttl = manager.ttl(&id).unwrap().unwrap();
+        assert!(ttl > 0 && ttl <= 5000);
+
+        // Remove TTL
+        manager.set_expire(&id, None).unwrap();
+        assert!(manager.ttl(&id).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_gc_removes_expired() {
+        let manager = DocumentManager::new();
+
+        // Create document with very short TTL (1ms)
+        let id = DocumentId::new("gc:1").unwrap();
+        manager.create(id.clone(), Strategy::Lww, Some(1)).unwrap();
+
+        // Create document without TTL
+        let id2 = DocumentId::new("gc:2").unwrap();
+        manager.create(id2.clone(), Strategy::Lww, None).unwrap();
+
+        // Wait for expiration
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Should have 1 expired document
+        assert_eq!(manager.expired_count(), 1);
+
+        // GC should remove 1 document
+        let removed = manager.gc();
+        assert_eq!(removed, 1);
+
+        // Only the non-expired document should remain
+        assert_eq!(manager.stats().document_count, 1);
+        assert!(manager.get(&id).is_err()); // Expired doc removed
+        assert!(manager.get(&id2).is_ok()); // Non-expired doc remains
     }
 }

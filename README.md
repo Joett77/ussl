@@ -297,6 +297,8 @@ pnpm build
 | `USSL_LOG_LEVEL` | info | Log level |
 | `USSL_DB` | (none) | SQLite database path for persistence |
 | `USSL_PASSWORD` | (none) | Password for authentication |
+| `USSL_RATE_LIMIT` | 0 | Max requests/sec per client (0 = disabled) |
+| `USSL_RATE_BURST` | 2x rate | Burst capacity for rate limiting |
 
 ### Command Line
 
@@ -310,6 +312,8 @@ Options:
   --log-level <LEVEL>    Log level [default: info] [env: USSL_LOG_LEVEL]
   --db <PATH>            SQLite database path [env: USSL_DB]
   --password <PASS>      Require authentication [env: USSL_PASSWORD]
+  --rate-limit <N>       Max requests/sec per client [env: USSL_RATE_LIMIT]
+  --rate-burst <N>       Burst capacity [env: USSL_RATE_BURST]
   --no-tcp               Disable TCP server
   --no-ws                Disable WebSocket server
   -c, --config <FILE>    Configuration file path [env: USSL_CONFIG]
