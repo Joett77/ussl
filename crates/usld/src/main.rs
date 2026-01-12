@@ -20,6 +20,9 @@
 //! # With TLS
 //! usld --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
 //!
+//! # With Prometheus metrics
+//! usld --metrics-port 9090
+//!
 //! # With configuration file
 //! usld --config /etc/ussl/config.toml
 //! ```
@@ -35,7 +38,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use ussl_core::DocumentManager;
 use ussl_storage::SqliteStorage;
-use ussl_transport::{RateLimitConfig, TcpServer, TlsConfig, WebSocketServer};
+use ussl_transport::{Metrics, MetricsServer, RateLimitConfig, TcpServer, TlsConfig, WebSocketServer};
 
 /// USSL Daemon - Universal State Synchronization Layer
 #[derive(Parser, Debug)]
@@ -93,6 +96,10 @@ struct Args {
     /// Rate limit burst size (default: 2x rate limit)
     #[arg(long, env = "USSL_RATE_BURST")]
     rate_burst: Option<u32>,
+
+    /// Prometheus metrics port (0 = disabled)
+    #[arg(long, env = "USSL_METRICS_PORT", default_value = "0")]
+    metrics_port: u16,
 }
 
 #[tokio::main]
@@ -168,12 +175,22 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize metrics if port specified
+    let metrics = if args.metrics_port > 0 {
+        let metrics = Arc::new(Metrics::new());
+        info!(port = args.metrics_port, "Prometheus metrics enabled");
+        Some(metrics)
+    } else {
+        None
+    };
+
     info!(
         tcp_port = args.tcp_port,
         ws_port = args.ws_port,
         bind = %args.bind,
         tls = tls_config.is_some(),
         rate_limit = args.rate_limit,
+        metrics = args.metrics_port > 0,
         "Starting USSL daemon"
     );
 
@@ -184,6 +201,17 @@ async fn main() -> Result<()> {
 
     // Start servers
     let mut handles = Vec::new();
+
+    // Start metrics server if enabled
+    if let Some(ref m) = metrics {
+        let metrics_addr: SocketAddr = format!("{}:{}", args.bind, args.metrics_port).parse()?;
+        let metrics_server = MetricsServer::new(m.clone(), metrics_addr);
+        handles.push(tokio::spawn(async move {
+            if let Err(e) = metrics_server.run().await {
+                tracing::error!(error = %e, "Metrics server error");
+            }
+        }));
+    }
 
     if !args.no_tcp {
         let tcp_addr: SocketAddr = format!("{}:{}", args.bind, args.tcp_port).parse()?;

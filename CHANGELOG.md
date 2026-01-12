@@ -34,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Preserves CRDT state for accurate synchronization after restore
   - TTL is preserved as remaining time from backup moment
 
+- **Prometheus Metrics** - Observability for production deployments
+  - `--metrics-port <port>` - Enable Prometheus metrics HTTP endpoint
+  - Environment variable: `USSL_METRICS_PORT`
+  - Metrics exposed at `http://<bind>:<port>/metrics`
+  - Health check endpoint at `/health`
+  - Metrics include:
+    - `ussl_connections_total` / `ussl_connections_active` - Connection tracking
+    - `ussl_commands_total` / `ussl_commands_errors_total` - Command execution
+    - `ussl_command_duration_seconds` - Latency histogram
+    - `ussl_documents_total` - Document count
+    - `ussl_bytes_received_total` / `ussl_bytes_sent_total` - Data transfer
+    - `ussl_rate_limited_requests_total` - Rate limiting stats
+    - `ussl_compactions_total` / `ussl_backups_total` / `ussl_restores_total`
+
 ## [0.3.0] - 2025-01-12
 
 ### Added

@@ -78,6 +78,9 @@ parking_lot = "0.12"
 # Testing
 criterion = "0.5"
 
+# Metrics
+prometheus = "0.13"
+
 # Internal crates
 ussl-core = { path = "crates/ussl-core" }
 ussl-protocol = { path = "crates/ussl-protocol" }

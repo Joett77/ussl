@@ -10,6 +10,7 @@ default = ["tcp", "websocket"]
 tcp = []
 websocket = ["dep:tokio-tungstenite"]
 tls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile"]
+metrics = ["dep:prometheus"]
 
 [dependencies]
 ussl-core.workspace = true
@@ -28,6 +29,9 @@ parking_lot.workspace = true
 rustls = { workspace = true, optional = true }
 tokio-rustls = { workspace = true, optional = true }
 rustls-pemfile = { workspace = true, optional = true }
+
+# Metrics (optional)
+prometheus = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
