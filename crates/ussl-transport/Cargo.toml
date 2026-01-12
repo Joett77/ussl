@@ -9,6 +9,7 @@ license.workspace = true
 default = ["tcp", "websocket"]
 tcp = []
 websocket = ["dep:tokio-tungstenite"]
+tls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-pemfile"]
 
 [dependencies]
 ussl-core.workspace = true
@@ -21,6 +22,11 @@ tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
 serde_json.workspace = true
+
+# TLS (optional)
+rustls = { workspace = true, optional = true }
+tokio-rustls = { workspace = true, optional = true }
+rustls-pemfile = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

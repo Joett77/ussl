@@ -37,6 +37,9 @@ cargo run --bin usld -- --password mysecretpassword
 # With both persistence and auth
 cargo run --bin usld -- --db ./data.db --password secret123
 
+# With TLS (requires certificate and key)
+cargo run --bin usld -- --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+
 # Custom ports
 cargo run --bin usld -- --tcp-port 7000 --ws-port 7001
 ```
@@ -873,7 +876,6 @@ USSL is designed for specific use cases. Be aware of these limitations:
 | Limitation | Status | Planned |
 |------------|--------|---------|
 | **Single node only** | No clustering | v2.0 |
-| **No TLS** | Plaintext only | v1.0 |
 | **Simple auth** | Password only, no ACL | v1.0 |
 | **No transactions** | Eventual consistency | By design |
 
@@ -882,7 +884,6 @@ USSL is designed for specific use cases. Be aware of these limitations:
 - **Banking/financial transactions** - USSL uses eventual consistency, not ACID transactions
 - **Strong consistency requirements** - If you need "read your own writes" guarantees, use PostgreSQL
 - **Very large documents** - CRDT overhead grows with document history; keep documents under 1MB
-- **High-security environments** - No TLS yet, simple password auth only
 
 ### Suited For
 

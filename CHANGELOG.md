@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-01-12
+
 ### Added
+- **TLS/SSL support** - Secure connections via `--tls-cert` and `--tls-key` flags
+  - TCP connections with TLS encryption
+  - WebSocket connections with WSS support
+  - Uses rustls (no OpenSSL dependency)
 - Comprehensive use case examples in README (games, docs, IoT, fleet, delivery)
 - Integration guide with React, Node.js, Python, Go examples
+- Limitations section in README documenting what USSL is/isn't suited for
+
+### Changed
+- Transport layer refactored to support both plain and TLS connections
+- Environment variables: `USSL_TLS_CERT`, `USSL_TLS_KEY`
 
 ## [0.2.0] - 2025-01-12
 

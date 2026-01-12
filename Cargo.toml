@@ -30,7 +30,7 @@ name = "benchmark"
 path = "examples/benchmark.rs"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Joett77/ussl"
@@ -59,6 +59,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # WebSocket
 tokio-tungstenite = "0.21"
 futures-util = "0.3"
+
+# TLS
+rustls = "0.23"
+tokio-rustls = "0.26"
+rustls-pemfile = "2.1"
 
 # Storage
 rusqlite = { version = "0.30", features = ["bundled"] }

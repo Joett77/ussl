@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
@@ -13,6 +13,9 @@ use ussl_storage::Storage;
 
 use crate::handler::ConnectionHandler;
 
+#[cfg(feature = "tls")]
+use crate::tls::TlsConfig;
+
 /// TCP Server for USSL
 pub struct TcpServer {
     manager: Arc<DocumentManager>,
@@ -20,6 +23,8 @@ pub struct TcpServer {
     client_counter: AtomicU64,
     password: Option<String>,
     storage: Option<Arc<dyn Storage>>,
+    #[cfg(feature = "tls")]
+    tls_config: Option<TlsConfig>,
 }
 
 impl TcpServer {
@@ -30,6 +35,8 @@ impl TcpServer {
             client_counter: AtomicU64::new(0),
             password: None,
             storage: None,
+            #[cfg(feature = "tls")]
+            tls_config: None,
         }
     }
 
@@ -41,6 +48,8 @@ impl TcpServer {
             client_counter: AtomicU64::new(0),
             password: Some(password),
             storage: None,
+            #[cfg(feature = "tls")]
+            tls_config: None,
         }
     }
 
@@ -50,10 +59,29 @@ impl TcpServer {
         self
     }
 
+    /// Enable TLS with the given configuration
+    #[cfg(feature = "tls")]
+    pub fn with_tls(mut self, tls_config: TlsConfig) -> Self {
+        self.tls_config = Some(tls_config);
+        self
+    }
+
+    /// Check if TLS is enabled
+    #[cfg(feature = "tls")]
+    pub fn is_tls_enabled(&self) -> bool {
+        self.tls_config.is_some()
+    }
+
     /// Start the TCP server
     pub async fn run(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = TcpListener::bind(self.addr).await?;
-        info!(addr = %self.addr, "USSL TCP server listening");
+
+        #[cfg(feature = "tls")]
+        let tls_status = if self.tls_config.is_some() { " (TLS)" } else { "" };
+        #[cfg(not(feature = "tls"))]
+        let tls_status = "";
+
+        info!(addr = %self.addr, "USSL TCP server listening{}", tls_status);
 
         loop {
             match listener.accept().await {
@@ -67,9 +95,35 @@ impl TcpServer {
                     let password = self.password.clone();
                     let storage = self.storage.clone();
 
+                    #[cfg(feature = "tls")]
+                    let tls_config = self.tls_config.clone();
+
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_connection(stream, client_id.clone(), manager, password, storage).await {
-                            error!(client = %client_id, error = %e, "Connection error");
+                        #[cfg(feature = "tls")]
+                        {
+                            if let Some(tls) = tls_config {
+                                match tls.acceptor().accept(stream).await {
+                                    Ok(tls_stream) => {
+                                        if let Err(e) = handle_connection(tls_stream, client_id.clone(), manager, password, storage).await {
+                                            error!(client = %client_id, error = %e, "TLS connection error");
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!(client = %client_id, error = %e, "TLS handshake failed");
+                                    }
+                                }
+                            } else {
+                                if let Err(e) = handle_connection(stream, client_id.clone(), manager, password, storage).await {
+                                    error!(client = %client_id, error = %e, "Connection error");
+                                }
+                            }
+                        }
+
+                        #[cfg(not(feature = "tls"))]
+                        {
+                            if let Err(e) = handle_connection(stream, client_id.clone(), manager, password, storage).await {
+                                error!(client = %client_id, error = %e, "Connection error");
+                            }
                         }
                     });
                 }
@@ -79,83 +133,89 @@ impl TcpServer {
             }
         }
     }
+}
 
-    async fn handle_connection(
-        mut stream: TcpStream,
-        client_id: String,
-        manager: Arc<DocumentManager>,
-        password: Option<String>,
-        storage: Option<Arc<dyn Storage>>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        info!(client = %client_id, "Client connected");
+/// Handle a connection with any stream type that implements AsyncRead + AsyncWrite
+async fn handle_connection<S>(
+    stream: S,
+    client_id: String,
+    manager: Arc<DocumentManager>,
+    password: Option<String>,
+    storage: Option<Arc<dyn Storage>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (mut read_half, mut write_half) = tokio::io::split(stream);
 
-        let handler = match password {
-            Some(pwd) => ConnectionHandler::with_auth(client_id.clone(), manager, pwd),
-            None => ConnectionHandler::new(client_id.clone(), manager),
-        };
-        let mut handler = match storage {
-            Some(s) => handler.with_storage(s),
-            None => handler,
-        };
-        let mut buf = vec![0u8; 4096];
-        let mut update_rx = handler.subscribe_updates();
+    info!(client = %client_id, "Client connected");
 
-        loop {
-            tokio::select! {
-                // Handle incoming data from client
-                result = stream.read(&mut buf) => {
-                    match result {
-                        Ok(0) => {
-                            info!(client = %client_id, "Client disconnected");
-                            break;
-                        }
-                        Ok(n) => {
-                            let responses = handler.process(&buf[..n]);
-                            for response in responses {
-                                let data = response.encode();
-                                stream.write_all(&data).await?;
+    let handler = match password {
+        Some(pwd) => ConnectionHandler::with_auth(client_id.clone(), manager, pwd),
+        None => ConnectionHandler::new(client_id.clone(), manager),
+    };
+    let mut handler = match storage {
+        Some(s) => handler.with_storage(s),
+        None => handler,
+    };
+    let mut buf = vec![0u8; 4096];
+    let mut update_rx = handler.subscribe_updates();
 
-                                // Check for QUIT command
-                                if matches!(response, Response::Ok(Some(ref msg)) if msg == "Goodbye") {
-                                    handler.cleanup();
-                                    return Ok(());
-                                }
+    loop {
+        tokio::select! {
+            // Handle incoming data from client
+            result = read_half.read(&mut buf) => {
+                match result {
+                    Ok(0) => {
+                        info!(client = %client_id, "Client disconnected");
+                        break;
+                    }
+                    Ok(n) => {
+                        let responses = handler.process(&buf[..n]);
+                        for response in responses {
+                            let data = response.encode();
+                            write_half.write_all(&data).await?;
+
+                            // Check for QUIT command
+                            if matches!(response, Response::Ok(Some(ref msg)) if msg == "Goodbye") {
+                                handler.cleanup();
+                                return Ok(());
                             }
-                        }
-                        Err(e) => {
-                            error!(client = %client_id, error = %e, "Read error");
-                            break;
                         }
                     }
+                    Err(e) => {
+                        error!(client = %client_id, error = %e, "Read error");
+                        break;
+                    }
                 }
+            }
 
-                // Handle updates for subscriptions
-                result = update_rx.recv() => {
-                    match result {
-                        Ok(delta) => {
-                            if handler.matches_subscription(&delta) {
-                                let response = Response::delta(delta.version, delta.data);
-                                let data = response.encode();
-                                if let Err(e) = stream.write_all(&data).await {
-                                    error!(client = %client_id, error = %e, "Write error");
-                                    break;
-                                }
+            // Handle updates for subscriptions
+            result = update_rx.recv() => {
+                match result {
+                    Ok(delta) => {
+                        if handler.matches_subscription(&delta) {
+                            let response = Response::delta(delta.version, delta.data);
+                            let data = response.encode();
+                            if let Err(e) = write_half.write_all(&data).await {
+                                error!(client = %client_id, error = %e, "Write error");
+                                break;
                             }
                         }
-                        Err(broadcast::error::RecvError::Lagged(n)) => {
-                            warn!(client = %client_id, missed = n, "Client lagged behind updates");
-                        }
-                        Err(broadcast::error::RecvError::Closed) => {
-                            break;
-                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(client = %client_id, missed = n, "Client lagged behind updates");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        break;
                     }
                 }
             }
         }
-
-        handler.cleanup();
-        Ok(())
     }
+
+    handler.cleanup();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -175,7 +235,7 @@ mod tests {
         let manager_clone = manager.clone();
         let server = tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            TcpServer::handle_connection(stream, "test".into(), manager_clone, None, None).await.unwrap();
+            handle_connection(stream, "test".into(), manager_clone, None, None).await.unwrap();
         });
 
         // Connect client

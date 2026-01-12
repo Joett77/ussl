@@ -17,6 +17,9 @@
 //! # With authentication
 //! usld --password mysecret
 //!
+//! # With TLS
+//! usld --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+//!
 //! # With configuration file
 //! usld --config /etc/ussl/config.toml
 //! ```
@@ -32,7 +35,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use ussl_core::DocumentManager;
 use ussl_storage::SqliteStorage;
-use ussl_transport::{TcpServer, WebSocketServer};
+use ussl_transport::{TcpServer, TlsConfig, WebSocketServer};
 
 /// USSL Daemon - Universal State Synchronization Layer
 #[derive(Parser, Debug)]
@@ -74,6 +77,14 @@ struct Args {
     /// Require authentication with this password
     #[arg(long, env = "USSL_PASSWORD")]
     password: Option<String>,
+
+    /// Path to TLS certificate file (PEM format)
+    #[arg(long, env = "USSL_TLS_CERT", requires = "tls_key")]
+    tls_cert: Option<PathBuf>,
+
+    /// Path to TLS private key file (PEM format)
+    #[arg(long, env = "USSL_TLS_KEY", requires = "tls_cert")]
+    tls_key: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -123,10 +134,28 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize TLS if certificate and key provided
+    let tls_config = match (&args.tls_cert, &args.tls_key) {
+        (Some(cert_path), Some(key_path)) => {
+            info!(cert = %cert_path.display(), key = %key_path.display(), "Loading TLS certificates");
+            match TlsConfig::from_pem(cert_path, key_path) {
+                Ok(config) => {
+                    info!("TLS enabled");
+                    Some(config)
+                }
+                Err(e) => {
+                    anyhow::bail!("Failed to load TLS certificates: {}", e);
+                }
+            }
+        }
+        _ => None,
+    };
+
     info!(
         tcp_port = args.tcp_port,
         ws_port = args.ws_port,
         bind = %args.bind,
+        tls = tls_config.is_some(),
         "Starting USSL daemon"
     );
 
@@ -147,6 +176,9 @@ async fn main() -> Result<()> {
         if let Some(ref s) = storage {
             tcp_server = tcp_server.with_storage(s.clone());
         }
+        if let Some(ref tls) = tls_config {
+            tcp_server = tcp_server.with_tls(tls.clone());
+        }
         handles.push(tokio::spawn(async move {
             if let Err(e) = tcp_server.run().await {
                 tracing::error!(error = %e, "TCP server error");
@@ -162,6 +194,9 @@ async fn main() -> Result<()> {
         };
         if let Some(ref s) = storage {
             ws_server = ws_server.with_storage(s.clone());
+        }
+        if let Some(ref tls) = tls_config {
+            ws_server = ws_server.with_tls(tls.clone());
         }
         handles.push(tokio::spawn(async move {
             if let Err(e) = ws_server.run().await {
