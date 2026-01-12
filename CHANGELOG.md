@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2025-01-12
+
 ### Added
 - **Document Compaction** - Prevents unbounded memory growth for CRDT documents
   - `COMPACT <id>` command to manually trigger compaction
@@ -47,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `ussl_bytes_received_total` / `ussl_bytes_sent_total` - Data transfer
     - `ussl_rate_limited_requests_total` - Rate limiting stats
     - `ussl_compactions_total` / `ussl_backups_total` / `ussl_restores_total`
+
+### Changed
+- First stable release - API is now considered stable
+- Version bump to 1.0.0
 
 ## [0.3.0] - 2025-01-12
 

@@ -15,8 +15,12 @@ USSL solves one of the most pervasive problems in modern distributed systems: **
 - 🔄 **CRDT-based sync** - Automatic conflict resolution with multiple strategies
 - 📡 **Real-time updates** - Subscribe to changes with delta updates
 - 📴 **Offline support** - Queue changes locally, sync when reconnected
-- 🔌 **Pluggable storage** - Memory, SQLite, PostgreSQL
-- 🌐 **Multiple transports** - TCP and WebSocket
+- 🔌 **Pluggable storage** - Memory, SQLite
+- 🌐 **Multiple transports** - TCP and WebSocket with TLS/SSL support
+- 🔒 **Security** - Password authentication, TLS encryption, rate limiting
+- ⏰ **TTL/Expiration** - Documents can automatically expire
+- 💾 **Backup/Restore** - Export and import all documents as JSON
+- 📊 **Prometheus Metrics** - Production observability
 - 🪶 **Lightweight** - Single binary, zero-config start
 - 🦀 **Built in Rust** - Fast, safe, and WASM-compatible
 
@@ -39,6 +43,12 @@ cargo run --bin usld -- --db ./data.db --password secret123
 
 # With TLS (requires certificate and key)
 cargo run --bin usld -- --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem
+
+# With Prometheus metrics
+cargo run --bin usld -- --metrics-port 9090
+
+# With rate limiting (100 req/sec per client)
+cargo run --bin usld -- --rate-limit 100
 
 # Custom ports
 cargo run --bin usld -- --tcp-port 7000 --ws-port 7001
@@ -144,6 +154,11 @@ USSL uses a simple text-based protocol inspired by Redis:
 | `PUSH` | `PUSH <id> <path> <value>` | Append to array |
 | `INC` | `INC <id> <path> <delta>` | Increment counter |
 | `PRESENCE` | `PRESENCE <id> [DATA <json>]` | Set/get presence |
+| `EXPIRE` | `EXPIRE <id> <ms>` | Set TTL on document (0 to remove) |
+| `TTL` | `TTL <id>` | Get remaining TTL (-1 = no TTL, -2 = expired) |
+| `COMPACT` | `COMPACT <id>` | Compact document (discard history) |
+| `BACKUP` | `BACKUP` | Export all documents as JSON |
+| `RESTORE` | `RESTORE <json>` | Import documents from backup |
 | `PING` | `PING` | Health check (always allowed) |
 | `KEYS` | `KEYS [pattern]` | List documents |
 | `INFO` | `INFO` | Server info |
@@ -226,8 +241,8 @@ sudo systemctl start usld
 **Alternative: Download .deb directly**
 ```bash
 # From GitHub Releases
-wget https://github.com/Joett77/ussl/releases/latest/download/usld_0.2.0_amd64.deb
-sudo dpkg -i usld_0.2.0_amd64.deb
+wget https://github.com/Joett77/ussl/releases/latest/download/usld_1.0.0_amd64.deb
+sudo dpkg -i usld_1.0.0_amd64.deb
 ```
 
 **Configuration file:** `/etc/ussl/ussl.toml`
@@ -297,8 +312,11 @@ pnpm build
 | `USSL_LOG_LEVEL` | info | Log level |
 | `USSL_DB` | (none) | SQLite database path for persistence |
 | `USSL_PASSWORD` | (none) | Password for authentication |
+| `USSL_TLS_CERT` | (none) | Path to TLS certificate (PEM) |
+| `USSL_TLS_KEY` | (none) | Path to TLS private key (PEM) |
 | `USSL_RATE_LIMIT` | 0 | Max requests/sec per client (0 = disabled) |
 | `USSL_RATE_BURST` | 2x rate | Burst capacity for rate limiting |
+| `USSL_METRICS_PORT` | 0 | Prometheus metrics port (0 = disabled) |
 
 ### Command Line
 
@@ -312,8 +330,11 @@ Options:
   --log-level <LEVEL>    Log level [default: info] [env: USSL_LOG_LEVEL]
   --db <PATH>            SQLite database path [env: USSL_DB]
   --password <PASS>      Require authentication [env: USSL_PASSWORD]
+  --tls-cert <PATH>      TLS certificate file (PEM) [env: USSL_TLS_CERT]
+  --tls-key <PATH>       TLS private key file (PEM) [env: USSL_TLS_KEY]
   --rate-limit <N>       Max requests/sec per client [env: USSL_RATE_LIMIT]
   --rate-burst <N>       Burst capacity [env: USSL_RATE_BURST]
+  --metrics-port <PORT>  Prometheus metrics port [env: USSL_METRICS_PORT]
   --no-tcp               Disable TCP server
   --no-ws                Disable WebSocket server
   -c, --config <FILE>    Configuration file path [env: USSL_CONFIG]
@@ -327,14 +348,19 @@ Options:
 # Development (in-memory, no auth)
 usld
 
-# Production (persistence + auth)
-usld --db /var/lib/ussl/data.db --password $USSL_PASSWORD
+# Production (persistence + auth + TLS + metrics)
+usld --db /var/lib/ussl/data.db \
+     --password $USSL_PASSWORD \
+     --tls-cert /etc/ussl/cert.pem \
+     --tls-key /etc/ussl/key.pem \
+     --metrics-port 9090 \
+     --rate-limit 1000
 
 # WebSocket only (for browser clients)
 usld --no-tcp --ws-port 8080
 
 # With environment variables
-USSL_DB=/data/ussl.db USSL_PASSWORD=secret usld
+USSL_DB=/data/ussl.db USSL_PASSWORD=secret USSL_METRICS_PORT=9090 usld
 ```
 
 ## Authentication
@@ -384,7 +410,6 @@ usld --db /var/lib/ussl/data.db
 **Storage backends:**
 - `memory` - Fast, volatile (default)
 - `sqlite` - Embedded persistence (single file)
-- `postgres` - Scalable persistence (planned for v1.0)
 
 ## Benchmarking
 
@@ -875,12 +900,12 @@ USSL uniquely combines:
 
 USSL is designed for specific use cases. Be aware of these limitations:
 
-### Current Limitations (v0.x)
+### Current Limitations (v1.x)
 
 | Limitation | Status | Planned |
 |------------|--------|---------|
 | **Single node only** | No clustering | v2.0 |
-| **Simple auth** | Password only, no ACL | v1.0 |
+| **Simple auth** | Password only, no ACL | v2.0 |
 | **No transactions** | Eventual consistency | By design |
 
 ### Not Suited For
@@ -1096,10 +1121,15 @@ USSL_PASSWORD=your-secure-password
 - [x] v0.2 - Load testing benchmark tool
 - [x] v0.2 - CLI improvements (env vars, auth flag)
 - [x] v0.2 - APT repository on GitHub Pages
-- [ ] v0.5 - Python SDK, config file support
-- [ ] v1.0 - Production-ready, PostgreSQL, WASM
-- [ ] v1.1 - S3 storage, Swift SDK
-- [ ] v2.0 - Multi-node clustering
+- [x] v0.3 - TLS/SSL support for TCP and WebSocket
+- [x] v1.0 - Document compaction (prevent unbounded memory growth)
+- [x] v1.0 - TTL/Expiration with background GC
+- [x] v1.0 - Rate limiting (token bucket algorithm)
+- [x] v1.0 - Backup/Restore (JSON export/import)
+- [x] v1.0 - Prometheus metrics and health endpoint
+- [ ] v1.1 - Python SDK, config file support
+- [ ] v1.2 - PostgreSQL storage, S3 storage
+- [ ] v2.0 - Multi-node clustering, ACL
 
 ## License
 
