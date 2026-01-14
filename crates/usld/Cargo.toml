@@ -32,7 +32,7 @@ tempfile = "3.10"
 [package.metadata.deb]
 maintainer = "USSL Contributors <ussl@users.noreply.github.com>"
 copyright = "2024, USSL Contributors"
-license-file = ["../../LICENSE-MIT", "0"]
+license-file = ["../../LICENSE", "0"]
 extended-description = """\
 USSL (Universal State Synchronization Layer) is an open-source \
 infrastructure primitive for state synchronization across distributed systems. \

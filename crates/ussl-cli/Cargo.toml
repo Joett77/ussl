@@ -19,7 +19,7 @@ anyhow.workspace = true
 [package.metadata.deb]
 maintainer = "USSL Contributors <ussl@users.noreply.github.com>"
 copyright = "2024, USSL Contributors"
-license-file = ["../../LICENSE-MIT", "0"]
+license-file = ["../../LICENSE", "0"]
 extended-description = """\
 USSL CLI client for connecting to and interacting with USSL servers. \
 Features interactive REPL, command history, and colored output."""
